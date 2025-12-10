@@ -1,6 +1,7 @@
 # Palimpsa
 <p align="center">
-  <img src="https://github.com/djo1996/Palimpsa/blob/main/assets/logo.png?raw=true" width="300">
+  ![Uploading image.png…]()
+
 </p>
 
 Palimpsa provides novel kernels for Linear Attention, designed to work seamlessly with `flash-linear-attention` and `flame`.
