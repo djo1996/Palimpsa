@@ -1,22 +1,19 @@
 # Palimpsa
 <p align="center">
-<img width="1024" height="718" alt="image" src="https://github.com/user-attachments/assets/fe74b23b-6496-4225-abc9-41d0cd17f856" />
+  <img src="https://github.com/djo1996/Palimpsa/blob/main/assets/logo.png?raw=true" width="300">
 </p>
 
 Palimpsa provides novel kernels for Linear Attention, designed to work seamlessly with `flash-linear-attention` and `flame`.
 
-## Installation
+## 🛠️ Installation (Developer Setup)
 
-### 1. Prerequisite: The "Hard" Stuff (CUDA Kernels)
-Because of CUDA version matching, it is safer to build `causal-conv1d` from source.
+Follow these steps to set up a research environment where `fla`, `flame`, and `palimpsa` are all editable.
 
+### 1. Create Environment
 ```bash
-# 1. Install Causal Conv1d (Strictly Required)
-git clone [https://github.com/Dao-AILab/causal-conv1d.git](https://github.com/Dao-AILab/causal-conv1d.git)
-cd causal-conv1d
-pip install .
-cd ..
+# Create a fresh environment
+python -m venv .venv
+source .venv/bin/activate
 
-# 2. (Optional) Mamba-SSM 
-# Only needed if you aren't using pure Triton kernels for Mamba2
-# pip install mamba-ssm
+# Upgrade pip (crucial for building wheels)
+pip install --upgrade pip
