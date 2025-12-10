@@ -1,7 +1,5 @@
-import torch
+# Palimpsa/palimpsa/integration.py
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
-
-# Import flame components
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
 from torchtitan.components.optimizer import build_optimizers
@@ -11,33 +9,31 @@ from flame.data import build_dataloader
 from torchtitan.protocols.train_spec import TrainSpec, register_train_spec
 
 # Import YOUR custom model
-from palimpsa.models.palimpsa import PalimpsaForCausalLM, PalimpsaConfig
+# Ensure your model file has PalimpsaForCausalLM and PalimpsaConfig
+from .models.palimpsa import PalimpsaForCausalLM, PalimpsaConfig
 
 # =============================================================================
-# 1. THE "MAGIC" FIX: Register with HuggingFace AutoClasses
+# 1. HuggingFace AutoClass Registration
 # =============================================================================
-# This effectively patches AutoConfig.from_pretrained() at runtime.
-# Now, when clean Flame calls AutoConfig.from_pretrained("..."), 
-# it will find PalimpsaConfig without needing an if/else block.
+# This patches AutoConfig so Flame can load your config without source hacks.
+# Flame calls AutoConfig.from_pretrained(), which will now find "palimpsa".
 try:
     AutoConfig.register("palimpsa", PalimpsaConfig)
     AutoModelForCausalLM.register(PalimpsaConfig, PalimpsaForCausalLM)
-    print("✅ Registered Palimpsa with Transformers AutoClasses")
 except ValueError:
-    print("⚠️ Palimpsa already registered with AutoClasses")
+    pass # Already registered
 
 # =============================================================================
-# 2. Register with Flame
+# 2. Flame Registry
 # =============================================================================
-
 def build_tokenizer(job_config):
     return AutoTokenizer.from_pretrained(job_config.model.tokenizer_path)
 
 register_train_spec(
     TrainSpec(
-        name="palimpsa",  
+        name="palimpsa",  # Matches YAML model.name
         cls=PalimpsaForCausalLM,
-        config=PalimpsaConfig, # Flame will use this if it sees the spec
+        config=PalimpsaConfig,
         parallelize_fn=parallelize_fla,
         pipelining_fn=pipeline_fla,
         build_optimizers_fn=build_optimizers,
@@ -47,5 +43,3 @@ register_train_spec(
         build_loss_fn=build_cross_entropy_loss,
     )
 )
-
-print("✅ Palimpsa Flame TrainSpec registered successfully!")
