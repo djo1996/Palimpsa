@@ -1,60 +1,48 @@
 <div align="center">
-
 <img width="800" alt="Palimpsa Logo" src="https://github.com/user-attachments/assets/7fa41f32-0976-42c9-8d32-2a602e56289f" />
 
 # Palimpsa
-
 ### Novel Kernels for Linear Attention
-A research plugin for **[flash-linear-attention](https://github.com/fla-org/flash-linear-attention)** and **[flame](https://github.com/fla-org/flame)**.
-
+A research plugin for **flash-linear-attention** and **flame**.
 </div>
 
----
-
 ## 🏗️ Developer Installation
-
-This setup creates a **Research Workspace** where `fla`, `flame`, and `palimpsa` live side-by-side. This allows you to modify the core libraries and your custom kernels simultaneously without re-installing wheels.
+This setup creates a Research Workspace where `fla`, `flame`, and `palimpsa` live side-by-side. This allows you to modify the core libraries and your custom kernels simultaneously without version conflicts.
 
 ### 1. Environment Setup
-Start with a fresh environment to avoid CUDA version conflicts.
+Start with a fresh environment. We explicitly pin `torchtitan` to the specific commit required by Flame.
 
 ```bash
 # Create and activate environment
 python -m venv palimpsa_env
 source palimpsa_env/bin/activate
 
-# Upgrade pip (Critical for building wheels)
+# Upgrade pip and install build dependencies (Critical)
 pip install --upgrade pip
+pip install numpy packaging ninja
 ```
 
-### 2. Install "The Hard Stuff" (CUDA Kernels)
-We build `causal-conv1d` from source to ensure the CUDA ABI matches your local toolkit exactly.
+### 2. Install Research Stack (Editable Mode)
+We install the dependencies in a specific order to ensure the correct versions are used.
 
 ```bash
-git clone [https://github.com/Dao-AILab/causal-conv1d.git](https://github.com/Dao-AILab/causal-conv1d.git)
-cd causal-conv1d
-pip install .
-cd ..
-```
+# 1. Install specific torchtitan commit (Required by Flame)
+pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
 
-### 3. Install Research Stack (Editable Mode)
-Clone the dependencies and install them with `-e` (editable).
-
-```bash
-# 1. Flash Linear Attention (The Modeling Library)
+# 2. Flash Linear Attention (The Modeling Library)
 git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
 cd flash-linear-attention
 pip install -e .
 cd ..
 
-# 2. Flame (The Training Engine)
+# 3. Flame (The Training Engine)
 git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
 cd flame
 pip install -e .
 cd ..
 ```
 
-### 4. Install Palimpsa
+### 3. Install Palimpsa
 Finally, clone and install this repository.
 
 ```bash
@@ -66,30 +54,29 @@ pip install -e .
 ---
 
 ## 🚀 Usage: Training with Flame
+We provide a custom launcher (`train.py`) that automatically registers Palimpsa models into the Flame engine. **You do not need to modify the Flame source code.**
 
-You do not need to modify the `flame` source code. Palimpsa models are injected dynamically via the configuration file.
+### 1. Create a Config
+Create a YAML configuration file in `configs/`. You can reference standard Flame configs for hyperparameters.
 
-### 1. Edit your Flame Config
-In your training config (e.g., `flame/configs/palimpsa_1.3B.yaml`), add the experimental block pointing to the integration script.
-
+**Example:** `configs/palimpsa_1.3B.yaml`
 ```yaml
 model:
   name: palimpsa        # Matches the name registered in Palimpsa
   flavor: 1.3B          # Your model configuration flavor
   # ... other standard model args ...
-
-experimental:
-  # ⚠️ CRITICAL: This path allows Flame to "hook" your custom model.
-  # Adjust the path relative to where you run the torchrun command.
-  custom_model_path: "../Palimpsa/palimpsa/integration.py"
+  
+training:
+  tensor_parallel_degree: 1      # Keep model whole (TP=1)
+  data_parallel_shard_degree: 8  # Split data across 8 GPUs (DP=8)
 ```
 
 ### 2. Run Training
-Run the standard Flame launch command from inside the `flame` directory.
+**Do not** run standard `torchrun` from the flame directory. Instead, use the `train.py` provided in this repository. It loads your plugin before starting the engine.
 
 ```bash
-cd ../flame
-torchrun --nproc_per_node=8 main.py --config configs/palimpsa_1.3B.yaml
+# Run from inside the 'Palimpsa' directory
+torchrun --nproc_per_node=8 train.py --config configs/palimpsa_1.3B.yaml
 ```
 
 ---
@@ -103,6 +90,22 @@ Palimpsa/
 │   ├── models/             # HuggingFace-compatible model definitions
 │   ├── ops/                # Triton/CUDA kernels
 │   └── integration.py      # The bridge script for Flame registry
+├── configs/                # Training configurations
+├── train.py                # <--- The Launcher Script (Runs Flame)
 ├── pyproject.toml          # Build configuration
 └── README.md
+```
+
+---
+
+## 📜 Citation
+If you use Palimpsa in your research, please cite:
+
+```bibtex
+@software{bonnet2025palimpsa,
+  author = {Bonnet, Djohan},
+  title = {Palimpsa: Novel Kernels for Linear Attention},
+  year = {2025},
+  url = {[https://github.com/djo1996/Palimpsa](https://github.com/djo1996/Palimpsa)}
+}
 ```
