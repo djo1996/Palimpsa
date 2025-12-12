@@ -64,6 +64,7 @@ cd ..
 git clone https://github.com/djo1996/Palimpsa.git
 cd Palimpsa
 pip install -e .
+cd ..
 ```
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
@@ -77,7 +78,7 @@ python prepare.py
 cd ../..
 
 # 2. Train Palimpsa (Nano flavor)
-python train_nano.py --model palimpsa --batch_size 64 --compile
+python train_nano.py --model palimpsa --batch_size 64
 ```
 *You should see the loss dropping within the first few iterations.*
 
