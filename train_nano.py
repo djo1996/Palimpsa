@@ -25,6 +25,7 @@ def get_args():
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--max_iters", type=int, default=5000, help="Max iterations")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--model", type=str, default="palimpsa", help="Model name (ignored, always palimpsa)") 
     return parser.parse_args()
 
 args = get_args()
