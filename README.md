@@ -90,12 +90,12 @@ python train_nano.py --model palimpsa --batch_size 64 --compile
 ### Install Flame Engine
 ```bash
 # 1. Install specific TorchTitan commit (Required for FSDP support in Flame)
-pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
+pip install git+https://github.com/pytorch/torchtitan.git@0b44d4c
 
 # 2. Install Flame
 # Navigate back to Palimpsa_Lab root first
 cd ../  
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+git clone https://github.com/fla-org/flame.git
 cd flame
 pip install -e .
 cd ..
