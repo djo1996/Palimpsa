@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F 
 import triton
 import triton.language as tl
-from fla.ops.utils import contiguous, prepare_chunk_offsets, prepare_chunk_indices
+from fla.ops.utils import prepare_chunk_offsets, prepare_chunk_indices
 from fla.utils import use_cuda_graph
 
 # -----------------------------------------------------------------------------
@@ -425,7 +425,6 @@ def chunk_palimpsa_bwd_kernel(
 
 class ChunkPalimpsa(torch.autograd.Function):
     @staticmethod
-    @contiguous
     @torch.autocast(device_type="cuda")
     def forward(ctx, q, k, v, b, gt, g, Ip, initial_mu_state, initial_I_state, scale, chunk_size, output_final_state, output_uncertainty, cu_seqlens, chunk_offsets, int_mu, int_I):
         # 1. Setup Strides
@@ -506,7 +505,6 @@ class ChunkPalimpsa(torch.autograd.Function):
         return o, o_var, final_mu, final_I
 
     @staticmethod
-    @contiguous
     @torch.autocast(device_type="cuda")
     def backward(ctx, do, do_var=None, d_mu=None, d_I=None):
         q, k, v, b, gt, g, Ip, int_mu, int_I, cu_seqlens, chunk_offsets = ctx.saved_tensors

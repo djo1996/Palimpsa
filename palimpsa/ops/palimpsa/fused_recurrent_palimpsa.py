@@ -8,7 +8,6 @@ from typing import Optional, Tuple
 import torch
 import triton
 import triton.language as tl
-from fla.ops.utils import contiguous
 from fla.modules.l2norm import l2norm_fwd
 from fla.utils import input_guard
 
