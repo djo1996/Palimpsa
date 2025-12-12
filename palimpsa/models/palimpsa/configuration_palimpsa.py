@@ -71,6 +71,7 @@ class PalimpsaConfig(PretrainedConfig):
         self.fuse_norm = fuse_norm
         self.fuse_swiglu = fuse_swiglu
         self.fuse_cross_entropy = fuse_cross_entropy
+        self.fuse_linear_cross_entropy = fuse_linear_cross_entropy
         self.use_l2warp = use_l2warp
         self.vocab_size = vocab_size
         self.allow_neg_eigval = allow_neg_eigval
