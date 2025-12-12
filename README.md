@@ -61,11 +61,10 @@ pip install -e .
 cd ..
 
 # 2. Palimpsa (This Repo)
-git clone git@github.com:djo1996/Palimpsa.git
+# (If you haven't cloned it yet)
+git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
 cd Palimpsa
 pip install -e .
-```
-
 ---
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
