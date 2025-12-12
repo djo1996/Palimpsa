@@ -66,7 +66,7 @@ Before launching large-scale runs, verify that the kernels are compiling and the
 
 ```bash
 # 1. Prepare data
-cd data/shakespeare
+cd Palimpsa/data/shakespeare
 python prepare.py
 cd ../..
 
