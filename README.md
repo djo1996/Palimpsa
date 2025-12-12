@@ -16,121 +16,90 @@ This approach solves the **stability-plasticity dilemma** in linear attention:
 - **Remembering:** Preserves critical past information using importance-weighted updates.
 - **Forgetting:** Prevents "catastrophic remembering" (loss of plasticity) by gradually releasing stale information via a Bayesian forgetting mechanism.
 
-Built as a plugin for [🔥 Flame](https://github.com/fla-org/flame), Palimpsa features custom **Triton kernels** that implement a chunk-wise parallel scan, achieving training throughput comparable to Mamba2 while offering superior performance on commonsense reasoning tasks at small scales (170M/340M).
-
 ---
 
-## 🛠️ Setup: The "Palimpsa_Lab" Workspace
+## 1. Installation
 
-To ensure full compatibility with the bleeding-edge versions of `fla` and `flame` required for this research, we recommend setting up a dedicated workspace named `Palimpsa_Lab`.
-
-This setup installs all libraries in **editable mode**, allowing you to inspect or modify the core training engine and kernels alongside your Palimpsa experiments.
-
-### 1. Create Workspace & Environment
-First, create the lab directory and a fresh virtual environment.
+For a quick start, you can install the standalone package.
 
 ```bash
-# 1. Create the working directory
-mkdir Palimpsa_Lab
-cd Palimpsa_Lab
+# 1. Create env (Python 3.10+ recommended)
+conda create -n palimpsa_env python=3.10
+conda activate palimpsa_env
 
-# 2. Create and activate a virtual environment
-python -m venv palimpsa_env
-source palimpsa_env/bin/activate  # On Windows use: palimpsa_env\Scripts\activate
+# 2. Install dependencies (We need Triton for the kernels)
+pip install torch packaging ninja
+pip install -U flash-attn --no-build-isolation
 
-# 3. Upgrade pip and install build tools (Critical for Triton kernels)
-pip install --upgrade pip
-pip install numpy packaging ninja
-```
-
-### 2. Install Research Stack
-Install dependencies in this exact order to prevent version conflicts.
-
-```bash
-# [CRITICAL] Install the specific TorchTitan commit required by Flame
-pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
-
-# 1. Flash Linear Attention (FLA) - The modeling backend
-git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
-cd flash-linear-attention
-pip install -e .
-cd ..
-
-# 2. Flame - The training engine
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
-cd flame
-pip install -e .
-cd ..
-
-# 3. Palimpsa - This repository
-git clone git@github.com:djo1996/Palimpsa.git
+# 3. Install Flash Linear Attention (FLA) & Palimpsa
+pip install git+[https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
+git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
 cd Palimpsa
 pip install -e .
 ```
 
 ---
 
-## 🚀 Usage: Training with Flame
+## 2. Test Run: Shakespeare (NanoGPT Style)
 
-Palimpsa is designed to be a "drop-in" extension for Flame. We provide a custom launcher (`train.py`) that registers the Palimpsa model architecture into the Flame registry automatically.
+Before scaling up, you can verify that the kernels are compiling and the model converges by training on the Shakespeare dataset (character-level). This codebase is adapted to support a lightweight "NanoGPT" style loop for debugging.
 
-### 1. Configuration
-Create a config file in `configs/`. You can inherit settings from standard Flame configs.
-
-**Example:** `configs/palimpsa_340M.yaml`
-```yaml
-model:
-  name: palimpsa        # Registered model name
-  flavor: 340M          # Size flavor (matches paper experiments)
-  expand_k: 0.5         # Palimpsa uses compressed state size for efficiency
-  expand_v: 1.0
-  
-training:
-  tensor_parallel_degree: 1       # TP=1
-  data_parallel_shard_degree: 8   # FSDP across 8 GPUs
-  # See flame/configs for scheduler/optimizer details
+**1. Prepare the data:**
+```bash
+cd data/shakespeare
+python prepare.py
+cd ../..
 ```
 
-### 2. Launch Training
-**Important:** Do not use the standard `flame` CLI. Use the `train.py` provided in this repo, which ensures the Palimpsa plugins are loaded before the engine starts.
+**2. Train Palimpsa:**
+```bash
+# Trains a small Palimpsa model on a single GPU
+python train_nano.py --model palimpsa --batch_size 64 --compile
+```
+*You should see the loss dropping within the first few iterations.*
+
+---
+
+## 3. Research Scale: Training with Flame
+
+To reproduce the paper results (170M/340M models on FineWeb-Edu) or to train at scale, we use the **[🔥 Flame](https://github.com/fla-org/flame)** engine. We recommend setting up a dedicated workspace named `Palimpsa_Lab` to handle the specific versioning required for the bleeding-edge stack.
+
+### Setup Workspace
+```bash
+# 1. Create the lab
+mkdir Palimpsa_Lab && cd Palimpsa_Lab
+
+# 2. Install specific TorchTitan commit (Required by Flame)
+pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
+
+# 3. Install Flame (Training Engine)
+git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+cd flame && pip install -e . && cd ..
+
+# 4. Link Palimpsa
+# (Assuming you cloned Palimpsa inside Palimpsa_Lab, or symlink it here)
+```
+
+### Launch Training
+Palimpsa acts as a plugin for Flame. Use the provided launcher to register the architecture:
 
 ```bash
-# Ensure you are inside the Palimpsa/ directory
+# Example: 340M model on 8 GPUs
 torchrun --nproc_per_node=8 train.py --config configs/palimpsa_340M.yaml
 ```
 
 ---
 
-## 📊 Performance & Benchmarks
+## 📊 Performance
 
 ### Mechanistic Architecture Design (MAD)
 Palimpsa achieves competitive scores on the MAD benchmark, excelling in state-tracking tasks.
 - **Perfect Score (100%)** on *IC & Noisy Recall*.
 - **Top-tier performance** on *Memorize* and *Selective Copy*.
 
-### Language Modeling
-Tested on **FineWeb-Edu** (15B/30B tokens):
-- **170M / 340M parameters:** Palimpsa outperforms strong baselines like **Gated DeltaNet** and **Transformer++** on perplexity and zero-shot commonsense reasoning (HellSwag, PIQA, etc.).
+### Language Modeling (FineWeb-Edu)
+- **170M / 340M parameters:** Palimpsa outperforms strong baselines like **Gated DeltaNet** and **Transformer++** on perplexity and zero-shot commonsense reasoning (HellSwag, PIQA).
 - **Scalability:** Uses a fused chunk-wise parallel scan (Triton) to maintain high training throughput.
-
----
-
-## 📂 Repository Structure
-
-```text
-Palimpsa_Lab/
-├── flash-linear-attention/     # Upstream dependency (cloned)
-├── flame/                      # Training engine (cloned)
-└── Palimpsa/                   # This Repo
-    ├── palimpsa/               
-    │   ├── layers/             # PalimpsaLayer (Bayesian update rules)
-    │   ├── models/             # HF-compatible Modeling code
-    │   ├── ops/                # Fused Triton kernels for parallel scan
-    │   └── integration.py      # Flame registry hooks
-    ├── configs/                # Experiment configurations
-    ├── train.py                # Custom launcher
-    └── pyproject.toml
-```
 
 ---
 
