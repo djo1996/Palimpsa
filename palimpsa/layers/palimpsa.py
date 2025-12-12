@@ -13,7 +13,7 @@ from torch.nn import functional as F
 
 from fla.layers.utils import get_unpad_data, index_first_axis, pad_input
 from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
-from fla.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa
+from palimpsa.ops import chunk_palimpsa, fused_recurrent_palimpsa
 
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
