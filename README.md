@@ -78,7 +78,7 @@ python prepare.py
 cd ../..
 
 # 2. Train Palimpsa (Nano flavor)
-python train_nano.py --model palimpsa --batch_size 64
+python train_nano.py --model palimpsa --batch_size 16
 ```
 *You should see the loss dropping within the first few iterations.*
 
