@@ -18,13 +18,11 @@ This approach solves the **stability-plasticity dilemma** in linear attention:
 
 ---
 
-## 🛠️ Installation: The "Palimpsa_Lab"
+## 🛠️ Installation: Core Components
 
-To ensure compatibility between the kernels, the training engine, and the model, we recommend setting up a unified workspace. This allows you to easily modify the upstream `FLA` kernels or `Flame` engine if needed.
+We recommend setting up a unified workspace. This installation covers the core model and kernels required to run small-scale experiments (like Shakespeare).
 
 ### 1. Create Workspace & Environment
-Start by creating the directory and the virtual environment.
-
 ```bash
 # 1. Create the working directory
 mkdir Palimpsa_Lab
@@ -46,9 +44,7 @@ python setup.py install
 cd ..
 ```
 
-### 3. Install Research Stack
-Install the libraries in this order. We use **editable mode** (`-e .`) so changes you make to the code are immediately reflected.
-
+### 3. Install FLA & Palimpsa
 ```bash
 # 1. Flash Linear Attention (FLA)
 git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
@@ -56,15 +52,7 @@ cd flash-linear-attention
 pip install -e .
 cd ..
 
-# 2. Flame (Training Engine)
-# Note: Flame requires specific torch-titan commits for FSDP support
-pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
-cd flame
-pip install -e .
-cd ..
-
-# 3. Palimpsa (This Repo)
+# 2. Palimpsa (This Repo)
 git clone git@github.com:djo1996/Palimpsa.git
 cd Palimpsa
 pip install -e .
@@ -89,12 +77,29 @@ python train_nano.py --model palimpsa --batch_size 64 --compile
 
 ---
 
-## 🔬 Research Scale: Training with Flame
+## 🔬 Advanced: Research Scale (Flame)
 
-To reproduce the paper results (170M/340M models on FineWeb-Edu), use the `train.py` launcher which registers Palimpsa into the Flame registry.
+**Note:** Only follow this step if you intend to train Large Language Models (LLMs) using the [🔥 Flame](https://github.com/fla-org/flame) engine. This requires a specific FSDP stack.
+
+### Install Flame Engine
+```bash
+# 1. Install specific TorchTitan commit (Required for FSDP support in Flame)
+pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
+
+# 2. Install Flame
+# Navigate back to Palimpsa_Lab root first
+cd ../  
+git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+cd flame
+pip install -e .
+cd ..
+```
+
+### Launch Training (FineWeb-Edu)
+To reproduce the paper results (170M/340M models), use the `train.py` launcher inside the `Palimpsa/` directory.
 
 ```bash
-# Run from inside the Palimpsa/ directory
+cd Palimpsa
 torchrun --nproc_per_node=8 train.py --config configs/palimpsa_340M.yaml
 ```
 
@@ -109,6 +114,19 @@ torchrun --nproc_per_node=8 train.py --config configs/palimpsa_340M.yaml
 ### Synthetic Tasks (MAD / MQAR)
 Benchmarks for Mechanistic Architecture Design (MAD) and Multi-Query Associative Recall (MQAR) are **coming soon**.
 *Preliminary results show perfect scores on Noisy Recall and competitive performance on State Tracking.*
+
+---
+
+## 🙏 Acknowledgements
+
+This project stands on the shoulders of giants. We adapted code and drew inspiration from these excellent repositories:
+
+* **[Longhorn](https://github.com/Cranial-XIX/longhorn):** For the sleek NanoGPT-style training loop and inspiration on online learning in SSMs.
+* **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention):** For the foundational linear attention implementations and chunk-wise parallel forms.
+* **[Flame](https://github.com/fla-org/flame):** For the robust training engine and FSDP integration.
+* **[Mamba (Triton Ops)](https://github.com/state-spaces/mamba/tree/main/mamba_ssm/ops/triton):** For the high-performance hardware-aware selective scan kernels.
+* **[Zoology](https://github.com/HazyResearch/zoology):** For synthetic task design and evaluation protocols.
+* **[MAD Lab](https://github.com/athms/mad-lab):** For the mechanistic interpretability and synthetic recall benchmarks.
 
 ---
 
