@@ -101,6 +101,17 @@ cd flame
 pip install -e .
 cd ..
 ```
+### Prepare FineWeb-Edu Data
+Training with Flame requires the dataset to be cached locally on the machine. (See Flame github)
+
+**1. Create the download script:**
+(This is already provided in `data/download_fineweb.py`)
+
+**2. Run the download:**
+Replace `/Local/your_name/.cache` with a path where you have significant storage space (approx. 500GB for 100BT tokens).
+
+```bash
+python data/download_fineweb.py --cache_dir /Local/your_name/.cache
 
 ### Launch Training (FineWeb-Edu)
 To reproduce the paper results (170M/340M models), use the `train.py` launcher inside the `Palimpsa/` directory.
