@@ -55,17 +55,16 @@ cd ..
 ### 4. Install FLA & Palimpsa
 ```bash
 # 1. Flash Linear Attention (FLA)
-git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
+git clone https://github.com/fla-org/flash-linear-attention.git
 cd flash-linear-attention
 pip install -e .
 cd ..
 
 # 2. Palimpsa (This Repo)
-# (If you haven't cloned it yet)
-git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
+git clone https://github.com/djo1996/Palimpsa.git
 cd Palimpsa
 pip install -e .
----
+```
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
 
