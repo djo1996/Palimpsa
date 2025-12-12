@@ -3,7 +3,7 @@ import sys
 import math
 import triton
 import time
-from fla.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa, palimpsa_ref
+from palimpsa.ops import chunk_palimpsa, fused_recurrent_palimpsa, palimpsa_ref
 
 print("cuda available: ", torch.cuda.is_available())
 torch.set_default_device("cuda")
