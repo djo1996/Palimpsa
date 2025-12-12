@@ -2,8 +2,8 @@
 
 from transformers import AutoConfig, AutoModel, AutoModelForCausalLM
 
-from palimpsa.models.configuration_palimpsa import PalimpsaConfig
-from palimpsa.models.modeling_palimpsa import PalimpsaBlock, PalimpsaForCausalLM, PalimpsaModel
+from .configuration_palimpsa import PalimpsaConfig
+from .modeling_palimpsa import PalimpsaBlock, PalimpsaForCausalLM, PalimpsaModel
 
 AutoConfig.register(PalimpsaConfig.model_type, PalimpsaConfig, exist_ok=True)
 AutoModel.register(PalimpsaConfig, PalimpsaModel, exist_ok=True)
