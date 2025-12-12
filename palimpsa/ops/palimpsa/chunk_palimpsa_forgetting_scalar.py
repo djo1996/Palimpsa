@@ -2,6 +2,7 @@
 # Copyright (c) 2025, Djohan Bonnet
 # Optimized Implementation of Palimpsa
 
+import functools
 import torch
 import torch.nn.functional as F 
 import triton
