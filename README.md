@@ -61,7 +61,7 @@ pip install -e ./Palimpsa
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
 
-Before launching large-scale runs, verify that the kernels are compiling and the model converges by training on the Shakespeare dataset.
+Before launching large-scale runs, verify that the kernels are compiling and the model converges by training on the Shakespeare dataset. You can easily switch between **Palimpsa**, **GLA**, and **Gated DeltaNet** using the `--model` argument.
 
 ```bash
 # 1. Prepare data
@@ -72,7 +72,13 @@ cd ../../..  # Return to Palimpsa_Lab root
 # 2. Train Palimpsa (Nano flavor)
 # Note: Execute from Palimpsa root
 cd Palimpsa
+
+# Train Palimpsa (Default)
 python train_nano.py --model palimpsa --batch_size 16
+
+# Train Baselines (Requires FLA installed)
+# python train_nano.py --model gla --batch_size 16
+# python train_nano.py --model gated_deltanet --batch_size 16
 ```
 *You should see the loss dropping within the first few iterations.*
 
