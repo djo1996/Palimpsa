@@ -18,106 +18,135 @@ This approach solves the **stability-plasticity dilemma** in linear attention:
 
 ---
 
-## 🛠️ Installation: Core Components
+## 🛠️ Installation (The "Zero to Hero" Setup)
 
-We recommend setting up a unified workspace. This installation covers the core model and kernels required to run small-scale experiments (like Shakespeare).
+We recommend setting up a unified workspace. This guide uses **`uv`** for fast dependency resolution and ensures compatibility with modern hardware (H100/H200).
 
-### 1. Create Workspace & Environment
-```bash
-# 1. Create the working directory
-mkdir Palimpsa_Lab
-cd Palimpsa_Lab
+> [!IMPORTANT]
+> **Compile where you run!**
+> This installation involves compiling custom CUDA kernels (`flash-linear-attention`, `causal-conv1d`).
+> You **MUST** run these steps on a **GPU Compute Node** (e.g., H100), not a login node.
+>
+> **Interactive Session:** `srun --partition=your-h100-partition --gres=gpu:1 --pty bash`
 
-# 2. Create and activate a virtual environment
-# (Using Python 3.10+ is recommended)
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-```
-
-### 2. Install Build Dependencies
-To compile the custom CUDA kernels, we need PyTorch and build tools installed first.
+### 1. Create Workspace & Clone Repos
+We organize everything into a `Palimpsa_Lab` directory to keep dependencies (Flame, FLA) side-by-side.
 
 ```bash
-pip install torch packaging ninja
-```
+mkdir Palimpsa_Lab && cd Palimpsa_Lab
 
-### 3. Install Core Kernels & Palimpsa
-We install from source to ensure CUDA kernels match your local setup.
-
-```bash
-# 1. Causal Conv1d
-git clone git@github.com:Dao-AILab/causal-conv1d.git
-pip install ./causal-conv1d
-
-# 2. Flash Linear Attention (FLA)
-git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
-pip install -e ./flash-linear-attention
-
-# 3. Palimpsa (This Repo)
+# 1. Clone Palimpsa
 git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
-pip install -e ./Palimpsa
+
+# 2. Clone Dependencies
+git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
 ```
 
-## 🚀 Quick Start: Shakespeare (NanoGPT)
-
-Before launching large-scale runs, verify that the kernels are compiling and the model converges by training on the Shakespeare dataset. You can easily switch between **Palimpsa**, **GLA**, and **Gated DeltaNet** using the `--model` argument.
+### 2. Install Environment
+We use `uv` to speed up the process and **PyTorch Nightly** to ensure compatibility with Flame and H100 drivers.
 
 ```bash
-# 1. Prepare data
-cd Palimpsa/data/shakespeare_char
-python prepare.py
-cd ../../..  # Return to Palimpsa_Lab root
+# 1. Install uv (Lightning fast pip replacement)
+pip install uv
 
-# 2. Train Palimpsa (Nano flavor)
-# Note: Execute from Palimpsa root
-cd Palimpsa
+# 2. Create Virtual Env
+uv venv palimpsa_env
+source palimpsa_env/bin/activate
 
-# Train Palimpsa (Default)
-python train_nano.py --model palimpsa --batch_size 16
+# 3. Load System CUDA (Crucial for H100s)
+# Adjust 'module load' for your specific cluster
+module load CUDA 
+export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
-# Train Baselines (Requires FLA installed)
-# python train_nano.py --model gla --batch_size 16
-# python train_nano.py --model gated_deltanet --batch_size 16
+# 4. Install PyTorch Nightly (Required for Flame)
+# We target CUDA 12.6 to match modern drivers
+uv pip install --pre torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/nightly/cu126](https://download.pytorch.org/whl/nightly/cu126)
+
+# 5. Install Build Tools
+uv pip install ninja packaging setuptools wheel
+
+# 6. Install Kernels (From Source)
+# --no-cache-dir ensures binaries are built for YOUR specific GPU
+uv pip install --no-cache-dir causal-conv1d
+uv pip install --no-cache-dir -e ./flash-linear-attention
+
+# 7. Install Flame Engine
+# Requires specific torchtitan commit for FSDP stability
+uv pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
+uv pip install -e ./flame
+
+# 8. Install Palimpsa
+uv pip install --no-cache-dir -e ./Palimpsa
 ```
-*You should see the loss dropping within the first few iterations.*
+
+### 3. Verification
+Run this one-liner to verify that PyTorch is talking to your GPU correctly:
+```bash
+python -c "import torch; print(f'⚡ Torch: {torch.__version__}'); print(f'🚀 CUDA Available: {torch.cuda.is_available()}'); import fla; print('✅ FLA Loaded Successfully')"
+```
 
 ---
 
-## 🔬 Advanced: Research Scale (Flame)
+## 🚀 Quick Start: Shakespeare (NanoGPT)
 
-**Note:** Only follow this step if you intend to train Large Language Models (LLMs) using the [🔥 Flame](https://github.com/fla-org/flame) engine. This requires a specific FSDP stack.
-
-### Install Flame Engine
-```bash
-# 1. Install specific TorchTitan commit (Required for FSDP support in Flame)
-pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
-
-# 2. Install Flame
-# Assuming you are in Palimpsa_Lab root
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
-pip install -e ./flame
-```
-
-### Prepare FineWeb-Edu Data
-Training with Flame requires the dataset to be cached locally on the machine.
-
-**1. Create the download script:**
-(This is already provided in `data/download_fineweb.py`)
-
-**2. Run the download:**
-Replace `/Local/your_name/.cache` with a path where you have significant storage space (approx. 500GB for 100BT tokens).
-
-```bash
-python data/download_fineweb.py --cache_dir /Local/your_name/.cache
-```
-
-### Launch Training (FineWeb-Edu)
-To reproduce the paper results (170M/340M models), use the `train.py` launcher inside the `Palimpsa/` directory.
+For quick debugging on a single GPU without the overhead of the Flame engine.
 
 ```bash
 cd Palimpsa
-torchrun --nproc_per_node=8 train.py --config configs/palimpsa_340M.yaml
+
+# 1. Prepare Data
+python data/shakespeare_char/prepare.py
+
+# 2. Train Palimpsa
+python train_nano.py --model palimpsa --batch_size 16
+
+# 3. Train Baselines
+# python train_nano.py --model gla --batch_size 16
+# python train_nano.py --model gated_deltanet --batch_size 16
+```
+
+---
+
+## 🔬 Research Scale Training (Flame)
+
+To train large models (170M+) using FSDP and the Flame engine.
+
+### 1. Download FineWeb-Edu
+Flame requires the dataset to be cached locally.
+
+```bash
+# Run from Palimpsa_Lab/Palimpsa/
+python data/download_fineweb.py --cache_dir /Local/your_name/.cache
+```
+
+### 2. Launch Training (Slurm)
+We use `torchrun` via Slurm. Ensure your script exports the same CUDA variables as the installation.
+
+**Example `train.slurm`:**
+```bash
+#!/bin/bash
+#SBATCH --job-name=Palimpsa
+#SBATCH --partition=pgi15-h100
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=8
+#SBATCH --time=24:00:00
+
+source palimpsa_env/bin/activate
+
+# CRITICAL: Match Install Environment
+export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+
+srun torchrun \
+    --nnodes=1 \
+    --nproc_per_node=8 \
+    Palimpsa/train.py \
+    --job.config_file flame/flame/models/fla.toml \
+    --model.name palimpsa \
+    --model.config Palimpsa/configs/palimpsa_170M.json \
+    --training.dataset_name sample-100BT
 ```
 
 ---
@@ -136,14 +165,12 @@ Benchmarks for Mechanistic Architecture Design (MAD) and Multi-Query Associative
 
 ## 🙏 Acknowledgements
 
-This project stands on the shoulders of giants. We adapted code and drew inspiration from these excellent repositories:
+This project stands on the shoulders of giants:
 
-* **[Longhorn](https://github.com/Cranial-XIX/longhorn):** For the sleek NanoGPT-style training loop and inspiration on online learning in SSMs.
-* **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention):** For the foundational linear attention implementations and chunk-wise parallel forms.
-* **[Flame](https://github.com/fla-org/flame):** For the robust training engine and FSDP integration.
-* **[Mamba](https://github.com/state-spaces/mamba/tree/main):** For the foundational SSM modeling components and high-performance selective scan kernels.
-* **[Zoology](https://github.com/HazyResearch/zoology):** For synthetic task design and evaluation protocols.
-* **[MAD Lab](https://github.com/athms/mad-lab):** For the mechanistic interpretability and synthetic recall benchmarks.
+* **[Longhorn](https://github.com/Cranial-XIX/longhorn):** NanoGPT-style training loop.
+* **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention):** Foundational linear attention kernels.
+* **[Flame](https://github.com/fla-org/flame):** Training engine and FSDP integration.
+* **[Zoology](https://github.com/HazyResearch/zoology):** Synthetic task evaluation.
 
 ---
 
