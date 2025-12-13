@@ -1,4 +1,3 @@
-# Palimpsa/palimpsa/integration.py
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 from flame.models.parallelize_fla import parallelize_fla
 from flame.models.pipeline_fla import pipeline_fla
@@ -8,30 +7,23 @@ from torchtitan.components.loss import build_cross_entropy_loss
 from flame.data import build_dataloader
 from torchtitan.protocols.train_spec import TrainSpec, register_train_spec
 
-# Import YOUR custom model
-# Ensure your model file has PalimpsaForCausalLM and PalimpsaConfig
-from .models.palimpsa import PalimpsaForCausalLM, PalimpsaConfig
+# --- FIX: Use absolute import here ---
+from palimpsa.models.palimpsa import PalimpsaForCausalLM, PalimpsaConfig
 
-# =============================================================================
-# 1. HuggingFace AutoClass Registration
-# =============================================================================
-# This patches AutoConfig so Flame can load your config without source hacks.
-# Flame calls AutoConfig.from_pretrained(), which will now find "palimpsa".
+# 1. AutoClass Registration (For HuggingFace)
 try:
     AutoConfig.register("palimpsa", PalimpsaConfig)
     AutoModelForCausalLM.register(PalimpsaConfig, PalimpsaForCausalLM)
 except ValueError:
-    pass # Already registered
+    pass 
 
-# =============================================================================
-# 2. Flame Registry
-# =============================================================================
+# 2. Flame Registry (For Training Engine)
 def build_tokenizer(job_config):
     return AutoTokenizer.from_pretrained(job_config.model.tokenizer_path)
 
 register_train_spec(
     TrainSpec(
-        name="palimpsa",  # Matches YAML model.name
+        name="palimpsa",
         cls=PalimpsaForCausalLM,
         config=PalimpsaConfig,
         parallelize_fn=parallelize_fla,

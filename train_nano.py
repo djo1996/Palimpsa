@@ -102,9 +102,7 @@ config_args = dict(
     use_cache=False
 )
 
-# Palimpsa specific (expand_v/k defaults usually handled in class, but explicit here for safety)
-if args.model == "palimpsa":
-    config_args.update(dict(expand_v=1.0, expand_k=1.0))
+
 
 config = ConfigClass(**config_args)
 model = ModelClass(config)
