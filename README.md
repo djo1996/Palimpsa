@@ -46,25 +46,20 @@ source palimpsa_env/bin/activate
 # 2. Install uv inside the venv
 pip install uv
 
-# 3. Load System CUDA (Crucial for H100s)
-# Note: If 'module' command is not found, ensure you are on a compute node or skip this line.
-# module load CUDA
-export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 
-# 4. Install PyTorch Nightly (Required for Flame/H100)
+# 3. Install PyTorch Nightly (Required for Flame/H100)
 # We target CUDA 12.6 to match modern drivers.
-uv pip install --pre torch torchvision torchaudio --index-url [https://download.pytorch.org/whl/nightly/cu126](https://download.pytorch.org/whl/nightly/cu126)
+uv pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126
 
-# 5. Install Build Tools
+# 4. Install Build Tools
 uv pip install ninja packaging setuptools wheel
 
-# 6. Install Kernels (From Source)
+# 5. Install Kernels (From Source)
 # --no-cache-dir ensures binaries are built for YOUR specific GPU
 uv pip install --no-cache-dir causal-conv1d
 uv pip install --no-cache-dir -e ./flash-linear-attention
 
-# 7. Install Palimpsa
+# 6. Install Palimpsa
 uv pip install --no-cache-dir -e ./Palimpsa
 ```
 
@@ -102,10 +97,10 @@ Return to the `Palimpsa_Lab` root directory.
 cd .. 
 
 # 1. Clone Flame
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+git clone https://github.com/fla-org/flame.git
 
 # 2. Install TorchTitan (Specific commit required for FSDP)
-uv pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
+uv pip install git + https://github.com/pytorch/torchtitan.git@0b44d4c
 
 # 3. Install Flame
 uv pip install -e ./flame
