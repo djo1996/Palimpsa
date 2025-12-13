@@ -135,7 +135,7 @@ This project stands on the shoulders of giants. We adapted code and drew inspira
 * **[Longhorn](https://github.com/Cranial-XIX/longhorn):** For the sleek NanoGPT-style training loop and inspiration on online learning in SSMs.
 * **[Flash Linear Attention](https://github.com/fla-org/flash-linear-attention):** For the foundational linear attention implementations and chunk-wise parallel forms.
 * **[Flame](https://github.com/fla-org/flame):** For the robust training engine and FSDP integration.
-* **[Mamba (Triton Ops)](https://github.com/state-spaces/mamba/tree/main/mamba_ssm/ops/triton):** For the high-performance hardware-aware selective scan kernels.
+* **[Mamba](https://github.com/state-spaces/mamba/tree/main):** For the foundational SSM modeling components and high-performance selective scan kernels.
 * **[Zoology](https://github.com/HazyResearch/zoology):** For synthetic task design and evaluation protocols.
 * **[MAD Lab](https://github.com/athms/mad-lab):** For the mechanistic interpretability and synthetic recall benchmarks.
 
