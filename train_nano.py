@@ -1,7 +1,7 @@
 """
 train_nano.py
-Minimal training script for Palimpsa on Shakespeare (NanoGPT style).
-Usage: python train_nano.py --batch_size 64
+Minimal training script for Palimpsa & FLA baselines on Shakespeare.
+Usage: python train_nano.py --model palimpsa --batch_size 64
 """
 import os
 import time
@@ -11,12 +11,20 @@ import numpy as np
 import torch
 from contextlib import nullcontext
 
-# --- Import Palimpsa ---
+# --- Imports ---
 from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 
+# Import FLA baselines dynamically to avoid crashing if FLA isn't installed
+try:
+    from fla.models import GLAForCausalLM, GLAConfig
+    from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
+except ImportError:
+    print("Warning: flash-linear-attention not found. Baselines (gla, gated_deltanet) will fail.")
+
 def get_args():
-    parser = argparse.ArgumentParser(description="Train Palimpsa on Shakespeare")
+    parser = argparse.ArgumentParser(description="Train Palimpsa/FLA on Shakespeare")
+    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"], help="Model architecture")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--block_size", type=int, default=256, help="Context length")
     parser.add_argument("--n_layer", type=int, default=6, help="Number of layers")
@@ -25,7 +33,6 @@ def get_args():
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--max_iters", type=int, default=5000, help="Max iterations")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--model", type=str, default="palimpsa", help="Model name (ignored, always palimpsa)") 
     return parser.parse_args()
 
 args = get_args()
@@ -46,7 +53,7 @@ dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported
 ptdtype = {'float32': torch.float32, 'bfloat16': torch.bfloat16, 'float16': torch.float16}[dtype]
 ctx = nullcontext() if args.device == 'cpu' else torch.amp.autocast(device_type='cuda', dtype=ptdtype)
 
-print(f"Training on {args.device} | Batch: {args.batch_size} | Context: {args.block_size}")
+print(f"Training {args.model} on {args.device} | Batch: {args.batch_size} | Context: {args.block_size}")
 
 # -----------------------------------------------------------------------------
 # Data Loading
@@ -66,7 +73,7 @@ def get_batch(split):
     return x, y
 
 # -----------------------------------------------------------------------------
-# Model
+# Model Initialization
 # -----------------------------------------------------------------------------
 meta_path = os.path.join(data_dir, 'meta.pkl')
 meta_vocab_size = 65
@@ -75,24 +82,35 @@ if os.path.exists(meta_path):
         meta = pickle.load(f)
     meta_vocab_size = meta['vocab_size']
 
-print("Initializing Palimpsa...")
-config = PalimpsaConfig(
+MODEL_REGISTRY = {
+    "palimpsa": (PalimpsaConfig, PalimpsaForCausalLM),
+    "gla": (GLAConfig, GLAForCausalLM),
+    "gated_deltanet": (GatedDeltaNetConfig, GatedDeltaNetForCausalLM),
+}
+
+print(f"Initializing {args.model}...")
+ConfigClass, ModelClass = MODEL_REGISTRY[args.model]
+
+# Common config args
+config_args = dict(
     vocab_size=meta_vocab_size,
     hidden_size=args.n_embd,
     num_hidden_layers=args.n_layer,
     num_heads=args.n_head,
-    num_kv_heads=args.n_head, 
+    num_kv_heads=args.n_head, # Most linear attentions map KV heads 1:1 or use MQA
     max_position_embeddings=args.block_size,
-    use_cache=False,
-    expand_v=1.0,
-    expand_k=1.0, 
+    use_cache=False
 )
 
-model = PalimpsaForCausalLM(config)
+# Palimpsa specific (expand_v/k defaults usually handled in class, but explicit here for safety)
+if args.model == "palimpsa":
+    config_args.update(dict(expand_v=1.0, expand_k=1.0))
+
+config = ConfigClass(**config_args)
+model = ModelClass(config)
 model.to(args.device)
 
 print(f"Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
-
 optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate, weight_decay=1e-1)
 
 # -----------------------------------------------------------------------------
