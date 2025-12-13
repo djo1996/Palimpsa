@@ -36,11 +36,11 @@ We organize everything into a `Palimpsa_Lab` directory to keep dependencies (Fla
 mkdir Palimpsa_Lab && cd Palimpsa_Lab
 
 # 1. Clone Palimpsa
-git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
+git clone https://github.com/djo1996/Palimpsa.git
 
 # 2. Clone Dependencies
-git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
-git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
+git clone https://github.com/fla-org/flame.git
+git clone https://github.com/fla-org/flash-linear-attention.git
 ```
 
 ### 2. Install Environment
