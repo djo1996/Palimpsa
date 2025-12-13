@@ -42,29 +42,21 @@ To compile the custom CUDA kernels, we need PyTorch and build tools installed fi
 pip install torch packaging ninja
 ```
 
-### 3. Install Core Kernels
-We need to compile `causal-conv1d` from source to ensure the CUDA kernels match your local setup.
+### 3. Install Core Kernels & Palimpsa
+We install from source to ensure CUDA kernels match your local setup.
 
 ```bash
+# 1. Causal Conv1d
 git clone git@github.com:Dao-AILab/causal-conv1d.git
-cd causal-conv1d
-python setup.py install
-cd ..
-```
+pip install ./causal-conv1d
 
-### 4. Install FLA & Palimpsa
-```bash
-# 1. Flash Linear Attention (FLA)
-git clone https://github.com/fla-org/flash-linear-attention.git
-cd flash-linear-attention
-pip install -e .
-cd ..
+# 2. Flash Linear Attention (FLA)
+git clone [https://github.com/fla-org/flash-linear-attention.git](https://github.com/fla-org/flash-linear-attention.git)
+pip install -e ./flash-linear-attention
 
-# 2. Palimpsa (This Repo)
-git clone https://github.com/djo1996/Palimpsa.git
-cd Palimpsa
-pip install -e .
-cd ..
+# 3. Palimpsa (This Repo)
+git clone [https://github.com/djo1996/Palimpsa.git](https://github.com/djo1996/Palimpsa.git)
+pip install -e ./Palimpsa
 ```
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
@@ -75,9 +67,11 @@ Before launching large-scale runs, verify that the kernels are compiling and the
 # 1. Prepare data
 cd Palimpsa/data/shakespeare_char
 python prepare.py
-cd ../..
+cd ../../..  # Return to Palimpsa_Lab root
 
 # 2. Train Palimpsa (Nano flavor)
+# Note: Execute from Palimpsa root
+cd Palimpsa
 python train_nano.py --model palimpsa --batch_size 16
 ```
 *You should see the loss dropping within the first few iterations.*
@@ -91,18 +85,16 @@ python train_nano.py --model palimpsa --batch_size 16
 ### Install Flame Engine
 ```bash
 # 1. Install specific TorchTitan commit (Required for FSDP support in Flame)
-pip install git+https://github.com/pytorch/torchtitan.git@0b44d4c
+pip install git+[https://github.com/pytorch/torchtitan.git@0b44d4c](https://github.com/pytorch/torchtitan.git@0b44d4c)
 
 # 2. Install Flame
-# Navigate back to Palimpsa_Lab root first
-cd ../  
-git clone https://github.com/fla-org/flame.git
-cd flame
-pip install -e .
-cd ..
+# Assuming you are in Palimpsa_Lab root
+git clone [https://github.com/fla-org/flame.git](https://github.com/fla-org/flame.git)
+pip install -e ./flame
 ```
+
 ### Prepare FineWeb-Edu Data
-Training with Flame requires the dataset to be cached locally on the machine. (See Flame github)
+Training with Flame requires the dataset to be cached locally on the machine.
 
 **1. Create the download script:**
 (This is already provided in `data/download_fineweb.py`)
@@ -112,6 +104,7 @@ Replace `/Local/your_name/.cache` with a path where you have significant storage
 
 ```bash
 python data/download_fineweb.py --cache_dir /Local/your_name/.cache
+```
 
 ### Launch Training (FineWeb-Edu)
 To reproduce the paper results (170M/340M models), use the `train.py` launcher inside the `Palimpsa/` directory.
