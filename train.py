@@ -8,7 +8,8 @@ import palimpsa.integration
 print("⚡ [Palimpsa] Plugin loaded and models registered.")
 
 # 2. Launch Flame (The Engine)
-from flame.main import main, JobConfig
+from flame.train import main
+from flame.config_manager import JobConfig
 
 if __name__ == "__main__":
     init_logger()
