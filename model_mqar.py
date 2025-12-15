@@ -206,7 +206,6 @@ class LMBackbone(nn.Module):
         hidden_states = self.ln_f(residual.to(dtype=self.ln_f.weight.dtype))
         return hidden_states
 
-
 class LanguageModel(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -232,11 +231,13 @@ class LanguageModel(nn.Module):
         logits = self.lm_head(hidden_states)
         
         if labels is not None:
-            # Shift tokens for next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
+            # --- FIX: REMOVED SHIFTING LOGIC ---
+            # Zoology dataloader already provides aligned targets (Input[t] -> Label[t])
+            # We compare logits directly to labels.
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            
+            # Flatten to [Batch * Seq, Vocab]
+            loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
             
             # Return HF-like output
             from collections import namedtuple
