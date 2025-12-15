@@ -67,8 +67,9 @@ class FLABlock(nn.Module):
         # 3. MLP
         self.mlp = GatedMLP(
             hidden_size=config.d_model,
-            hidden_ratio=4, 
-            act_fn='swish'
+            hidden_ratio=4,
+            # FIXED: Removed 'act_fn' argument as it caused the crash.
+            # FLA GatedMLP defaults to Swish/SiLU automatically.
         )
 
     def forward(self, hidden_states, residual):
