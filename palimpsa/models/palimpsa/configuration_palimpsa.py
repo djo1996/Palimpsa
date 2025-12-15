@@ -22,7 +22,7 @@ class PalimpsaConfig(PretrainedConfig):
         head_dim: int = 256,
         num_heads: int = 6,
         num_v_heads: Optional[int] = None,
-        mode: str = "chunk", # [FIX] Explicitly defined mode. Default to 'chunk' for training stability.
+        attn_mode: str = "chunk", 
         max_position_embeddings: int = 2048,
         hidden_ratio: Optional[int] = 4,
         intermediate_size: Optional[int] = None,
@@ -53,7 +53,7 @@ class PalimpsaConfig(PretrainedConfig):
         self.head_dim = head_dim
         self.num_heads = num_heads
         self.num_v_heads = num_v_heads
-        self.mode = mode
+        self.attn_mode = attn_mode
         
         # This logic is fine, but 'auto' is a magic string.
         self.beta_step_rank = math.ceil(self.hidden_size / 16) if beta_step_rank == "auto" else beta_step_rank

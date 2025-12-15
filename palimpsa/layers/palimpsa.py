@@ -35,7 +35,7 @@ class Palimpsa(nn.Module):
         num_heads: int = 6,
         num_v_heads: int = None,
         beta_step_rank: int = 128,
-        mode: str = 'chunk',
+        attn_mode: str = 'chunk',
         use_gate: bool = True,
         use_short_conv: bool = True,
         allow_neg_eigval: bool = False,
@@ -47,7 +47,7 @@ class Palimpsa(nn.Module):
     ) -> Palimpsa:
         super().__init__()
 
-        self.mode = mode
+        self.mode = attn_mode
         self.allow_neg_eigval = allow_neg_eigval
         self.hidden_size = hidden_size
         self.expand_v = expand_v

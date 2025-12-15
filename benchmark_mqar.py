@@ -6,78 +6,62 @@ import numpy as np
 from tqdm import tqdm
 
 # --- IMPORTS ---
+# 1. The Model (Rosetta Stone version with APE & Weight Tying)
 try:
-    from palimpsa import PalimpsaConfig, PalimpsaForCausalLM
+    from model_mqar import LanguageModel
 except ImportError:
     import sys
     sys.path.append(os.getcwd())
-    from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
-    from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
+    from model_mqar import LanguageModel
 
-# Import Data Pipeline
+# 2. The Configs
+from config_mqar import MQAR_CONFIGS
+
+# 3. Data Pipeline
 from data.data_mqar.config import DataConfig
 from data.data_mqar.associative_recall import MQARConfig
 from data.data_mqar.utils import prepare_data
 
-# FLA Baselines
-try:
-    from fla.models import GLAForCausalLM, GLAConfig
-    from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
-    FLA_AVAILABLE = True
-except ImportError:
-    FLA_AVAILABLE = False
-    print("⚠️ FLA not found. Baselines unavailable.")
 
 # --- METRIC HELPERS ---
 def compute_accuracy(logits, labels, ignore_index=-100):
-    """
-    Computes accuracy while ignoring the ignore_index (usually padding).
-    """
-    # logits: [batch, seq_len, vocab_size]
-    # labels: [batch, seq_len]
     preds = torch.argmax(logits, dim=-1)
-    
     mask = labels != ignore_index
     correct = (preds == labels) & mask
-    
-    # Avoid division by zero
     total_valid = mask.sum().float()
-    if total_valid == 0:
-        return 0.0
-        
-    accuracy = correct.sum().float() / total_valid
-    return accuracy.item()
+    return (correct.sum().float() / total_valid).item() if total_valid > 0 else 0.0
 
 @torch.no_grad()
 def evaluate(model, dataloader):
-    """
-    Runs the model on the validation set and returns avg loss and accuracy.
-    """
     model.eval()
-    total_loss = 0
-    total_acc = 0
-    steps = 0
-    
-    for input_ids, labels, slices in dataloader:
+    total_loss, total_acc, steps = 0, 0, 0
+    for input_ids, labels, _ in dataloader:
         input_ids, labels = input_ids.cuda(), labels.cuda()
+        output = model(input_ids, labels=labels) # Returns CausalLMOutput(loss, logits)
         
-        outputs = model(input_ids, labels=labels)
-        loss = outputs.loss
-        
-        acc = compute_accuracy(outputs.logits, labels)
-        
-        total_loss += loss.item()
-        total_acc += acc
+        total_loss += output.loss.item()
+        total_acc += compute_accuracy(output.logits, labels)
         steps += 1
-        
     model.train()
     return total_loss / steps, total_acc / steps
 
 # --- TRAINING LOOP ---
 def train(args):
-    print(f"--- MQAR Benchmark: {args.model} | SeqLen {args.seq_len} | KV {args.num_kv_pairs} ---")
+    print(f"--- MQAR Benchmark ---")
+    print(f"Config: {args.config} | SeqLen {args.seq_len} | KV {args.num_kv_pairs}")
+
+    # 1. Load & Patch Configuration
+    if args.config not in MQAR_CONFIGS:
+        raise ValueError(f"Config '{args.config}' not found. Available: {list(MQAR_CONFIGS.keys())}")
     
-    # 1. Setup Data
+    model_config = MQAR_CONFIGS[args.config]
+    
+    # Override config defaults with CLI args to allow flexibility
+    model_config.max_position_embeddings = args.seq_len
+    model_config.vocab_size = args.vocab_size
+    model_config.d_model = args.d_model # Allow overriding 128 if desired
+    
+    # 2. Setup Data
     mqar_conf = MQARConfig(
         vocab_size=args.vocab_size,
         input_seq_len=args.seq_len,
@@ -85,8 +69,6 @@ def train(args):
         num_kv_pairs=args.num_kv_pairs,
         power_a=0.01 
     )
-    
-    # We create a smaller config for testing to keep valid loop fast
     test_conf = mqar_conf.model_copy()
     test_conf.num_examples = 200 # Small validation set
 
@@ -100,37 +82,21 @@ def train(args):
     print("Preparing Data...")
     train_loader, test_loader = prepare_data(data_config)
 
-    # 2. Setup WandB
+    # 3. Setup WandB
     if args.use_wandb:
         wandb.init(
             project="Palimpsa_MQAR", 
-            config=args, 
-            name=f"{args.model}_len{args.seq_len}_kv{args.num_kv_pairs}"
+            config={**args.__dict__, **model_config.__dict__}, 
+            name=f"{args.config}_len{args.seq_len}_kv{args.num_kv_pairs}"
         )
 
-    # 3. Setup Model
-    if args.model == "palimpsa":
-        config = PalimpsaConfig(
-            vocab_size=args.vocab_size,
-            hidden_size=args.d_model,
-            num_hidden_layers=2,
-            max_position_embeddings=args.seq_len,
-            use_cache=False
-        )
-        model = PalimpsaForCausalLM(config).cuda()
-    elif FLA_AVAILABLE and args.model == "gla":
-        config = GLAConfig(vocab_size=args.vocab_size, hidden_size=args.d_model, max_position_embeddings=args.seq_len)
-        model = GLAForCausalLM(config).cuda()
-    elif FLA_AVAILABLE and args.model == "gated_deltanet":
-        config = GatedDeltaNetConfig(vocab_size=args.vocab_size, hidden_size=args.d_model, max_position_embeddings=args.seq_len)
-        model = GatedDeltaNetForCausalLM(config).cuda()
-    else:
-        raise ValueError(f"Model {args.model} not found.")
+    # 4. Init Model (Uses model_mqar.py which handles APE/Embeddings)
+    model = LanguageModel(model_config).cuda()
 
-    print(f"Model Parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
+    print(f"Model: {model_config.layer_name} | Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    # 4. Loop
+    # 5. Loop
     model.train()
     pbar = tqdm(train_loader, total=args.steps)
     
@@ -139,8 +105,8 @@ def train(args):
 
         input_ids, labels = input_ids.cuda(), labels.cuda()
         
-        outputs = model(input_ids, labels=labels)
-        loss = outputs.loss
+        output = model(input_ids, labels=labels)
+        loss = output.loss
         
         optimizer.zero_grad()
         loss.backward()
@@ -148,42 +114,32 @@ def train(args):
         
         # Logging
         if step % 10 == 0:
-            # Compute train accuracy on the fly for the current batch
-            train_acc = compute_accuracy(outputs.logits, labels)
-            
+            train_acc = compute_accuracy(output.logits, labels)
             pbar.set_description(f"Loss: {loss.item():.4f} | Acc: {train_acc:.2%}")
-            
             if args.use_wandb:
-                wandb.log({
-                    "train/loss": loss.item(),
-                    "train/accuracy": train_acc,
-                    "step": step
-                })
+                wandb.log({"train/loss": loss.item(), "train/accuracy": train_acc, "step": step})
 
-        # Validation Loop (every 50 steps)
         if step % 50 == 0 and step > 0:
             val_loss, val_acc = evaluate(model, test_loader)
             if args.use_wandb:
-                wandb.log({
-                    "val/loss": val_loss,
-                    "val/accuracy": val_acc,
-                    "step": step
-                })
+                wandb.log({"val/loss": val_loss, "val/accuracy": val_acc, "step": step})
 
     if args.use_wandb:
         wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"])
+    # Changed --model to --config
+    parser.add_argument("--config", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"], help="Choose from pre-defined configs in config_mqar.py")
+    
     parser.add_argument("--seq_len", type=int, default=512)
     parser.add_argument("--d_model", type=int, default=128)
     parser.add_argument("--num_kv_pairs", type=int, default=32)
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--steps", type=int, default=1000)
-    parser.add_argument("--cache_dir", type=str, default="./data_cache", help="Where to save synthetic data")
+    parser.add_argument("--steps", type=int, default=3000)
+    parser.add_argument("--cache_dir", type=str, default="./data_cache")
     parser.add_argument("--use_wandb", action="store_true")
     args = parser.parse_args()
     
