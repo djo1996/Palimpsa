@@ -5,6 +5,7 @@ class DataSegmentConfig(BaseModel):
     name: str = "base"
     num_examples: int = 1_000
     input_seq_len: int = 64
+    vocab_size: int = 8_192
     
     def build(self, seed: int):
         raise NotImplementedError
