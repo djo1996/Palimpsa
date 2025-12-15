@@ -32,7 +32,7 @@ def get_layer_class(layer_name):
         
     elif layer_name.lower() == 'gated_deltanet':
         # FLA export name usually 'GatedDeltaNet' or 'SimpleGatedDeltaNet'
-        from fla.layers.delta_net import GatedDeltaNet
+        from fla.layers.gated_deltanet import GatedDeltaNet
         return GatedDeltaNet
     
     else:
