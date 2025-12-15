@@ -143,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-3)
-    parser.add_argument("--steps", type=int, default=100000) 
+    parser.add_argument("--steps", type=int, default=10000) 
     parser.add_argument("--cache_dir", type=str, default="./data_cache")
     parser.add_argument("--use_wandb", action="store_true")
     args = parser.parse_args()
