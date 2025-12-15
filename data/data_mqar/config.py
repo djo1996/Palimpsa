@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 class DataSegmentConfig(BaseModel):
     name: str = "base"
-    seed: int = 0
     num_examples: int = 1_000
     input_seq_len: int = 64
     
