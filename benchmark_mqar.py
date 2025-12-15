@@ -132,9 +132,9 @@ if __name__ == "__main__":
     # Changed --model to --config
     parser.add_argument("--config", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"], help="Choose from pre-defined configs in config_mqar.py")
     
-    parser.add_argument("--seq_len", type=int, default=512)
+    parser.add_argument("--seq_len", type=int, default=128)
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--num_kv_pairs", type=int, default=32)
+    parser.add_argument("--num_kv_pairs", type=int, default=16)
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
