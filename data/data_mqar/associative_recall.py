@@ -11,7 +11,13 @@ class MQARConfig(DataSegmentConfig):
     include_slices: bool=True
 
     def build(self, seed: int) -> DataSegment:
-        return multiquery_ar(**self.model_dump(), seed=seed)
+        # --- FIX START ---
+        # We must overwrite the default seed in the config with the specific one passed 
+        # by the dataloader. We do this by updating the dict before unpacking.
+        config_dump = self.model_dump()
+        config_dump["seed"] = seed
+        return multiquery_ar(**config_dump)
+        # --- FIX END ---
 
 def multiquery_ar(
     vocab_size: int,
