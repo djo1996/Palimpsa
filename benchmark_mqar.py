@@ -1,122 +1,86 @@
 import torch
-import torch.nn as nn
 import argparse
-import numpy as np
 import wandb
+import os
 from tqdm import tqdm
-from contextlib import nullcontext
 
-# --- 1. Robust Imports (Matching your file structure) ---
+# --- IMPORTS ---
 try:
-    # Try clean import first (in case you fix __init__.py later)
-    from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
-    from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
+    from palimpsa import PalimpsaConfig, PalimpsaForCausalLM
 except ImportError:
-    # Fallback to local path if running from root without package install
-    import sys, os
+    # Fallback to local
+    import sys
     sys.path.append(os.getcwd())
     from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
     from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 
-# --- 2. FLA Baselines (Dynamic Import) ---
+# Import the New Data Pipeline
+from palimpsa.data.data_mqar.config import DataConfig
+from palimpsa.data.data_mqar.associative_recall import MQARConfig
+from palimpsa.data.data_mqar.utils import prepare_data
+
+# FLA Baselines
 try:
     from fla.models import GLAForCausalLM, GLAConfig
     from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
     FLA_AVAILABLE = True
 except ImportError:
     FLA_AVAILABLE = False
-    print("⚠️ FLA not installed. GLA and GatedDeltaNet will be unavailable.")
+    print("⚠️ FLA not found. Baselines unavailable.")
 
-# --- 3. The Real MQAR Logic (No external dependency) ---
-class MQARGenerator:
-    """
-    Multi-Query Associative Recall Generator.
-    - Scatters KV pairs randomly in the context.
-    - Queries are appended at the end.
-    - Crucial for testing 'needle-in-haystack' capability.
-    """
-    def __init__(self, vocab_size, seq_len, num_kv_pairs, batch_size, device='cuda'):
-        self.vocab_size = vocab_size
-        self.seq_len = seq_len
-        self.num_kv_pairs = num_kv_pairs
-        self.batch_size = batch_size
-        self.device = device
-
-    def __iter__(self):
-        while True:
-            # Init empty inputs and labels
-            input_ids = torch.randint(0, self.vocab_size, (self.batch_size, self.seq_len), device=self.device)
-            labels = torch.full_like(input_ids, -100)
-            
-            # Generate Keys and Values
-            keys = torch.randint(0, self.vocab_size, (self.batch_size, self.num_kv_pairs), device=self.device)
-            values = torch.randint(0, self.vocab_size, (self.batch_size, self.num_kv_pairs), device=self.device)
-            
-            # --- Scatter KV pairs ---
-            # We need 2 positions per pair (Key, Value) + space for queries at end
-            # We reserve the last `num_kv_pairs` tokens for queries
-            context_len = self.seq_len - self.num_kv_pairs
-            
-            for b in range(self.batch_size):
-                # Select random indices for Keys (ensure space for Value after each Key)
-                # We simply pick 'num_kv_pairs' indices from 0 to context_len-2
-                # This is a simplified scatter: strictly K then V immediately
-                possible_indices = np.arange(context_len - 1)
-                kv_start_indices = np.random.choice(possible_indices, self.num_kv_pairs, replace=False)
-                
-                # Assign K and V
-                input_ids[b, kv_start_indices] = keys[b]
-                input_ids[b, kv_start_indices + 1] = values[b]
-                
-                # --- Create Queries at the end ---
-                # The last chunk is just the keys again
-                input_ids[b, context_len:] = keys[b]
-                
-                # The target for the queries is the values
-                labels[b, context_len:] = values[b]
-
-            yield input_ids, labels
-
-# --- 4. Training Loop ---
 def train(args):
     print(f"--- MQAR Benchmark: {args.model} | SeqLen {args.seq_len} | KV {args.num_kv_pairs} ---")
     
+    # 1. Setup Data Config (Zoology Style)
+    mqar_conf = MQARConfig(
+        vocab_size=args.vocab_size,
+        input_seq_len=args.seq_len,
+        num_examples=args.steps * args.batch_size, # Generate enough data for the steps
+        num_kv_pairs=args.num_kv_pairs,
+        power_a=0.01 # Zipfian distribution for gaps
+    )
+    
+    data_config = DataConfig(
+        train_configs=[mqar_conf],
+        test_configs=[mqar_conf], # Just reuse for simplified bench script
+        batch_size=args.batch_size,
+        cache_dir=os.path.expanduser(args.cache_dir) if args.cache_dir else None
+    )
+
+    print("Preparing Data (this might take a moment to generate/cache)...")
+    train_loader, _ = prepare_data(data_config)
+
+    # 2. Setup Model
     if args.use_wandb:
         wandb.init(project="Palimpsa_MQAR", config=args, name=f"{args.model}_kv{args.num_kv_pairs}")
 
-    # Configuration map
-    MODEL_MAP = {
-        "palimpsa": (PalimpsaConfig, PalimpsaForCausalLM),
-    }
-    if FLA_AVAILABLE:
-        MODEL_MAP.update({
-            "gla": (GLAConfig, GLAForCausalLM),
-            "gated_deltanet": (GatedDeltaNetConfig, GatedDeltaNetForCausalLM)
-        })
+    if args.model == "palimpsa":
+        config = PalimpsaConfig(
+            vocab_size=args.vocab_size,
+            hidden_size=args.d_model,
+            num_hidden_layers=2,
+            max_position_embeddings=args.seq_len,
+            use_cache=False
+        )
+        model = PalimpsaForCausalLM(config).cuda()
+    elif FLA_AVAILABLE and args.model == "gla":
+        config = GLAConfig(vocab_size=args.vocab_size, hidden_size=args.d_model, max_position_embeddings=args.seq_len)
+        model = GLAForCausalLM(config).cuda()
+    elif FLA_AVAILABLE and args.model == "gated_deltanet":
+        config = GatedDeltaNetConfig(vocab_size=args.vocab_size, hidden_size=args.d_model, max_position_embeddings=args.seq_len)
+        model = GatedDeltaNetForCausalLM(config).cuda()
+    else:
+        raise ValueError(f"Model {args.model} not found or FLA missing.")
 
-    if args.model not in MODEL_MAP:
-        raise ValueError(f"Model {args.model} not implemented or FLA missing.")
-
-    ConfigClass, ModelClass = MODEL_MAP[args.model]
-    
-    # Init Config
-    config = ConfigClass(
-        vocab_size=args.vocab_size,
-        hidden_size=args.d_model,
-        num_hidden_layers=2, # Small model for MQAR usually enough
-        num_heads=4, 
-        max_position_embeddings=args.seq_len,
-        use_cache=False
-    )
-    
-    model = ModelClass(config).cuda()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    generator = MQARGenerator(args.vocab_size, args.seq_len, args.num_kv_pairs, args.batch_size)
-    data_iter = iter(generator)
+
+    # 3. Training Loop
+    model.train()
+    pbar = tqdm(train_loader, total=len(train_loader))
     
-    pbar = tqdm(range(args.steps))
-    for step in pbar:
-        input_ids, labels = next(data_iter)
+    for step, (input_ids, labels, slices) in enumerate(pbar):
+        input_ids = input_ids.cuda()
+        labels = labels.cuda()
         
         outputs = model(input_ids, labels=labels)
         loss = outputs.loss
@@ -130,6 +94,9 @@ def train(args):
             pbar.set_description(f"Loss: {loss.item():.4f}")
             if args.use_wandb:
                 wandb.log({"loss": loss.item(), "step": step})
+        
+        if step >= args.steps:
+            break
 
     if args.use_wandb:
         wandb.finish()
@@ -143,8 +110,9 @@ if __name__ == "__main__":
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--steps", type=int, default=2000)
-    parser.add_argument("--use_wandb", action="store_true", help="Log to Weights & Biases")
+    parser.add_argument("--steps", type=int, default=1000)
+    parser.add_argument("--cache_dir", type=str, default="./data_cache", help="Where to save synthetic data")
+    parser.add_argument("--use_wandb", action="store_true")
     args = parser.parse_args()
     
     train(args)

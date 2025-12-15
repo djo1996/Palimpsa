@@ -1,1 +1,39 @@
+# --- Python & Build ---
 __pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# --- Environments ---
+.env
+venv/
+palimpsa_env/
+.venv/
+
+# --- Data & Weights (CRITICAL) ---
+*.bin
+*.pkl
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+data_cache/
+Palimpsa/data/data_mqar/cache/
+
+# --- Specific Project Outputs ---
+out_nano/
+checkpoints/
+results/
+
+# --- Logs & Debugging ---
+wandb/
+*.log
+*.out
+*.err
+
+# --- IDEs ---
+.vscode/
+.idea/
+.DS_Store
