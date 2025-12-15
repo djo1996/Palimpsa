@@ -53,6 +53,8 @@ def train(args):
     model_config.d_model = args.d_model
     
     # 1. Setup Data
+    # Zoology: 100,000 examples per epoch * 64 epochs implies infinite stream, 
+    # but we will just generate enough data for the requested 'args.steps'.
     mqar_conf = MQARConfig(
         vocab_size=args.vocab_size,
         input_seq_len=args.seq_len,
@@ -85,10 +87,10 @@ def train(args):
     model = LanguageModel(model_config).cuda()
     print(f"Model Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     
-    # Match Zoology: AdamW with 0.1 weight decay
+    # [CRITICAL] Zoology Settings: Weight Decay 0.1
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
     
-    # Match Zoology: Cosine Annealing Scheduler
+    # [CRITICAL] Zoology Settings: Cosine Annealing Scheduler (Decay LR to 0)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=args.steps, eta_min=0.0
     )
@@ -108,7 +110,7 @@ def train(args):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        scheduler.step() # Step the scheduler
+        scheduler.step() # Apply LR decay
         
         # Logging
         if step % 10 == 0:
@@ -123,7 +125,8 @@ def train(args):
                     "step": step
                 })
 
-        if step % 100 == 0 and step > 0:
+        # Eval every 500 steps (matches roughly "per epoch" feel)
+        if step % 500 == 0 and step > 0:
             val_loss, val_acc = evaluate(model, test_loader)
             if args.use_wandb:
                 wandb.log({"val/loss": val_loss, "val/accuracy": val_acc, "step": step})
@@ -139,8 +142,8 @@ if __name__ == "__main__":
     parser.add_argument("--num_kv_pairs", type=int, default=32)
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--steps", type=int, default=3000)
+    parser.add_argument("--lr", type=float, default=3e-3)
+    parser.add_argument("--steps", type=int, default=100000) 
     parser.add_argument("--cache_dir", type=str, default="./data_cache")
     parser.add_argument("--use_wandb", action="store_true")
     args = parser.parse_args()
