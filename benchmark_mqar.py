@@ -15,9 +15,9 @@ except ImportError:
     from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 
 # Import the New Data Pipeline
-from palimpsa.data.data_mqar.config import DataConfig
-from palimpsa.data.data_mqar.associative_recall import MQARConfig
-from palimpsa.data.data_mqar.utils import prepare_data
+from data.data_mqar.config import DataConfig
+from data.data_mqar.associative_recall import MQARConfig
+from data.data_mqar.utils import prepare_data
 
 # FLA Baselines
 try:
