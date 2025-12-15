@@ -41,21 +41,15 @@ source palimpsa_env/bin/activate
 # 2. Install uv inside the venv
 pip install uv
 
-
-# 3. Install PyTorch Nightly (Required for Flame/H100)
-# We target CUDA 12.6 to match modern drivers.
-uv pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu126
-
 # 4. Install Build Tools
 uv pip install ninja packaging setuptools wheel
 
 # 5. Install Kernels (From Source)
-# --no-cache-dir ensures binaries are built for YOUR specific GPU
-uv pip install --no-cache-dir causal-conv1d
-uv pip install --no-cache-dir -e ./flash-linear-attention
+uv pip install causal-conv1d
+uv pip install -e ./flash-linear-attention
 
 # 6. Install Palimpsa
-uv pip install --no-cache-dir -e ./Palimpsa
+uv pip install -e ./Palimpsa
 ```
 
 ---
