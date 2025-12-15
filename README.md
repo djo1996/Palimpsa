@@ -18,11 +18,6 @@
 
 This sets up the core environment required to run the model and the NanoGPT quick start.
 
-> [!IMPORTANT]
-> **Compile where you run!**
-> You **MUST** run these steps on a **GPU Compute Node** (e.g., H100), not a login node.
->
-> **Interactive Session:** `srun --partition=pgi15-h100 --gres=gpu:1 --pty bash`
 
 ### 1. Create Workspace
 ```bash
