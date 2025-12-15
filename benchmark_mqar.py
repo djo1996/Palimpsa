@@ -1,23 +1,39 @@
-# Save this as bench_mqar.py in the root of your Palimpsa repo
 import torch
 import torch.nn as nn
 import argparse
+import numpy as np
+import wandb
 from tqdm import tqdm
+from contextlib import nullcontext
 
-# Adjust these imports to match your new clean package structure
-# e.g., if you have Palimpsa/models/palimpsa.py
+# --- 1. Robust Imports (Matching your file structure) ---
 try:
-    from palimpsa import PalimpsaConfig, PalimpsaForCausalLM
+    # Try clean import first (in case you fix __init__.py later)
+    from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
+    from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 except ImportError:
-    # Fallback if package isn't installed in editable mode yet
-    import sys
-    sys.path.append(".") 
-    from palimpsa.models import PalimpsaConfig, PalimpsaForCausalLM
+    # Fallback to local path if running from root without package install
+    import sys, os
+    sys.path.append(os.getcwd())
+    from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
+    from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 
+# --- 2. FLA Baselines (Dynamic Import) ---
+try:
+    from fla.models import GLAForCausalLM, GLAConfig
+    from fla.models import GatedDeltaNetForCausalLM, GatedDeltaNetConfig
+    FLA_AVAILABLE = True
+except ImportError:
+    FLA_AVAILABLE = False
+    print("⚠️ FLA not installed. GLA and GatedDeltaNet will be unavailable.")
+
+# --- 3. The Real MQAR Logic (No external dependency) ---
 class MQARGenerator:
     """
-    On-the-fly generator for Multi-Query Associative Recall.
-    No complex dataloaders, just raw tensors.
+    Multi-Query Associative Recall Generator.
+    - Scatters KV pairs randomly in the context.
+    - Queries are appended at the end.
+    - Crucial for testing 'needle-in-haystack' capability.
     """
     def __init__(self, vocab_size, seq_len, num_kv_pairs, batch_size, device='cuda'):
         self.vocab_size = vocab_size
@@ -28,53 +44,72 @@ class MQARGenerator:
 
     def __iter__(self):
         while True:
-            # 1. Init sequences with random noise
+            # Init empty inputs and labels
             input_ids = torch.randint(0, self.vocab_size, (self.batch_size, self.seq_len), device=self.device)
-            labels = input_ids.clone()
+            labels = torch.full_like(input_ids, -100)
             
-            # 2. Generate Keys and Values
-            # We reserve the first 'num_kv_pairs' * 2 positions for the KV definitions? 
-            # Or scatter them? For standard MQAR, we usually scatter them.
-            # Here is a simplified version: Puts KV pairs at the start, queries at the end.
-            
+            # Generate Keys and Values
             keys = torch.randint(0, self.vocab_size, (self.batch_size, self.num_kv_pairs), device=self.device)
             values = torch.randint(0, self.vocab_size, (self.batch_size, self.num_kv_pairs), device=self.device)
             
-            # Place K V K V ... at the beginning
-            for i in range(self.num_kv_pairs):
-                input_ids[:, 2*i] = keys[:, i]     # Key
-                input_ids[:, 2*i+1] = values[:, i] # Value
-                # We don't want to predict the Key, we want to predict the Value
-                labels[:, 2*i] = -100 
+            # --- Scatter KV pairs ---
+            # We need 2 positions per pair (Key, Value) + space for queries at end
+            # We reserve the last `num_kv_pairs` tokens for queries
+            context_len = self.seq_len - self.num_kv_pairs
             
-            # Place Queries at the end (repeat the keys)
-            # This is a basic "recall" setup.
-            # In a real rigorous test, you might shuffle positions.
-            start_query_idx = self.seq_len - self.num_kv_pairs
-            input_ids[:, start_query_idx:] = keys
-            labels[:, start_query_idx:] = values
-            
-            # Mask everything else in labels
-            labels[:, 2*self.num_kv_pairs : start_query_idx] = -100
+            for b in range(self.batch_size):
+                # Select random indices for Keys (ensure space for Value after each Key)
+                # We simply pick 'num_kv_pairs' indices from 0 to context_len-2
+                # This is a simplified scatter: strictly K then V immediately
+                possible_indices = np.arange(context_len - 1)
+                kv_start_indices = np.random.choice(possible_indices, self.num_kv_pairs, replace=False)
+                
+                # Assign K and V
+                input_ids[b, kv_start_indices] = keys[b]
+                input_ids[b, kv_start_indices + 1] = values[b]
+                
+                # --- Create Queries at the end ---
+                # The last chunk is just the keys again
+                input_ids[b, context_len:] = keys[b]
+                
+                # The target for the queries is the values
+                labels[b, context_len:] = values[b]
 
             yield input_ids, labels
 
+# --- 4. Training Loop ---
 def train(args):
     print(f"--- MQAR Benchmark: {args.model} | SeqLen {args.seq_len} | KV {args.num_kv_pairs} ---")
     
-    config = PalimpsaConfig(
+    if args.use_wandb:
+        wandb.init(project="Palimpsa_MQAR", config=args, name=f"{args.model}_kv{args.num_kv_pairs}")
+
+    # Configuration map
+    MODEL_MAP = {
+        "palimpsa": (PalimpsaConfig, PalimpsaForCausalLM),
+    }
+    if FLA_AVAILABLE:
+        MODEL_MAP.update({
+            "gla": (GLAConfig, GLAForCausalLM),
+            "gated_deltanet": (GatedDeltaNetConfig, GatedDeltaNetForCausalLM)
+        })
+
+    if args.model not in MODEL_MAP:
+        raise ValueError(f"Model {args.model} not implemented or FLA missing.")
+
+    ConfigClass, ModelClass = MODEL_MAP[args.model]
+    
+    # Init Config
+    config = ConfigClass(
         vocab_size=args.vocab_size,
         hidden_size=args.d_model,
-        num_hidden_layers=2,
-        max_position_embeddings=args.seq_len
+        num_hidden_layers=2, # Small model for MQAR usually enough
+        num_heads=4, 
+        max_position_embeddings=args.seq_len,
+        use_cache=False
     )
     
-    if args.model == 'palimpsa':
-        model = PalimpsaForCausalLM(config).cuda()
-    elif args.model == 'gla':
-        from fla.models import GatedLinearAttention
-        model = GatedLinearAttention(config).cuda()
-
+    model = ModelClass(config).cuda()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     generator = MQARGenerator(args.vocab_size, args.seq_len, args.num_kv_pairs, args.batch_size)
     data_iter = iter(generator)
@@ -90,18 +125,26 @@ def train(args):
         loss.backward()
         optimizer.step()
         
-        pbar.set_description(f"Loss: {loss.item():.4f}")
+        # Logging
+        if step % 10 == 0:
+            pbar.set_description(f"Loss: {loss.item():.4f}")
+            if args.use_wandb:
+                wandb.log({"loss": loss.item(), "step": step})
+
+    if args.use_wandb:
+        wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "gla"])
+    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"])
     parser.add_argument("--seq_len", type=int, default=512)
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--num_kv_pairs", type=int, default=16)
+    parser.add_argument("--num_kv_pairs", type=int, default=32)
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--steps", type=int, default=2000)
+    parser.add_argument("--use_wandb", action="store_true", help="Log to Weights & Biases")
     args = parser.parse_args()
     
     train(args)
