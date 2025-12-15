@@ -6,7 +6,6 @@ import numpy as np
 from tqdm import tqdm
 
 # --- IMPORTS ---
-# 1. The Model (Rosetta Stone version with APE & Weight Tying)
 try:
     from model_mqar import LanguageModel
 except ImportError:
@@ -14,14 +13,10 @@ except ImportError:
     sys.path.append(os.getcwd())
     from model_mqar import LanguageModel
 
-# 2. The Configs
 from config_mqar import MQAR_CONFIGS
-
-# 3. Data Pipeline
 from data.data_mqar.config import DataConfig
 from data.data_mqar.associative_recall import MQARConfig
 from data.data_mqar.utils import prepare_data
-
 
 # --- METRIC HELPERS ---
 def compute_accuracy(logits, labels, ignore_index=-100):
@@ -37,8 +32,7 @@ def evaluate(model, dataloader):
     total_loss, total_acc, steps = 0, 0, 0
     for input_ids, labels, _ in dataloader:
         input_ids, labels = input_ids.cuda(), labels.cuda()
-        output = model(input_ids, labels=labels) # Returns CausalLMOutput(loss, logits)
-        
+        output = model(input_ids, labels=labels)
         total_loss += output.loss.item()
         total_acc += compute_accuracy(output.logits, labels)
         steps += 1
@@ -50,18 +44,15 @@ def train(args):
     print(f"--- MQAR Benchmark ---")
     print(f"Config: {args.config} | SeqLen {args.seq_len} | KV {args.num_kv_pairs}")
 
-    # 1. Load & Patch Configuration
     if args.config not in MQAR_CONFIGS:
-        raise ValueError(f"Config '{args.config}' not found. Available: {list(MQAR_CONFIGS.keys())}")
+        raise ValueError(f"Config '{args.config}' not found.")
     
     model_config = MQAR_CONFIGS[args.config]
-    
-    # Override config defaults with CLI args to allow flexibility
     model_config.max_position_embeddings = args.seq_len
     model_config.vocab_size = args.vocab_size
-    model_config.d_model = args.d_model # Allow overriding 128 if desired
+    model_config.d_model = args.d_model
     
-    # 2. Setup Data
+    # 1. Setup Data
     mqar_conf = MQARConfig(
         vocab_size=args.vocab_size,
         input_seq_len=args.seq_len,
@@ -70,7 +61,7 @@ def train(args):
         power_a=0.01 
     )
     test_conf = mqar_conf.model_copy()
-    test_conf.num_examples = 200 # Small validation set
+    test_conf.num_examples = 400 
 
     data_config = DataConfig(
         train_configs=[mqar_conf],
@@ -82,7 +73,7 @@ def train(args):
     print("Preparing Data...")
     train_loader, test_loader = prepare_data(data_config)
 
-    # 3. Setup WandB
+    # 2. Setup WandB
     if args.use_wandb:
         wandb.init(
             project="Palimpsa_MQAR", 
@@ -90,13 +81,19 @@ def train(args):
             name=f"{args.config}_len{args.seq_len}_kv{args.num_kv_pairs}"
         )
 
-    # 4. Init Model (Uses model_mqar.py which handles APE/Embeddings)
+    # 3. Init Model & Optimizer
     model = LanguageModel(model_config).cuda()
+    print(f"Model Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
+    
+    # Match Zoology: AdamW with 0.1 weight decay
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
+    
+    # Match Zoology: Cosine Annealing Scheduler
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.steps, eta_min=0.0
+    )
 
-    print(f"Model: {model_config.layer_name} | Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
-    # 5. Loop
+    # 4. Loop
     model.train()
     pbar = tqdm(train_loader, total=args.steps)
     
@@ -111,15 +108,22 @@ def train(args):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step() # Step the scheduler
         
         # Logging
         if step % 10 == 0:
             train_acc = compute_accuracy(output.logits, labels)
+            lr = scheduler.get_last_lr()[0]
             pbar.set_description(f"Loss: {loss.item():.4f} | Acc: {train_acc:.2%}")
             if args.use_wandb:
-                wandb.log({"train/loss": loss.item(), "train/accuracy": train_acc, "step": step})
+                wandb.log({
+                    "train/loss": loss.item(), 
+                    "train/accuracy": train_acc, 
+                    "train/lr": lr,
+                    "step": step
+                })
 
-        if step % 50 == 0 and step > 0:
+        if step % 100 == 0 and step > 0:
             val_loss, val_acc = evaluate(model, test_loader)
             if args.use_wandb:
                 wandb.log({"val/loss": val_loss, "val/accuracy": val_acc, "step": step})
@@ -129,12 +133,10 @@ def train(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # Changed --model to --config
-    parser.add_argument("--config", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"], help="Choose from pre-defined configs in config_mqar.py")
-    
-    parser.add_argument("--seq_len", type=int, default=128)
+    parser.add_argument("--config", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"])
+    parser.add_argument("--seq_len", type=int, default=512)
     parser.add_argument("--d_model", type=int, default=128)
-    parser.add_argument("--num_kv_pairs", type=int, default=16)
+    parser.add_argument("--num_kv_pairs", type=int, default=32)
     parser.add_argument("--vocab_size", type=int, default=8192)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=1e-3)
