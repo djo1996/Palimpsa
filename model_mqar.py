@@ -1,250 +1,216 @@
-import math
-from functools import partial
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from functools import partial
+from typing import Optional, Tuple
 
-# --- Imports from FLA ---
-# We use the primitives (Norms, MLP) from FLA to build the Blocks
+# --- FLA Imports ---
 try:
     from fla.modules import RMSNorm, GatedMLP
 except ImportError:
     print("⚠️ Warning: fla not found. Please install flash-linear-attention.")
 
-# --- Robust Layer Imports ---
-def get_layer_class(layer_name):
-    """Dynamically import the attention layer based on name."""
-    if layer_name.lower() == 'palimpsa':
+# --- Dynamic Layer Loader ---
+def get_mixer_class(layer_name: str):
+    """
+    Dynamically imports the mixing layer (Attention/SSM) from FLA or local packages.
+    """
+    name = layer_name.lower()
+    
+    # 1. Palimpsa
+    if name == 'palimpsa':
         try:
-            # Try local package first, then FLA
-            from palimpsa.models.palimpsa.modeling_palimpsa import Palimpsa
+            from fla.layers.palimpsa import Palimpsa
             return Palimpsa
         except ImportError:
-            try:
-                from fla.layers.palimpsa import Palimpsa
-                return Palimpsa
-            except ImportError:
-                raise ImportError("Could not import Palimpsa layer from 'palimpsa' or 'fla'.")
-                
-    elif layer_name.lower() == 'gla':
+            # Fallback for local dev
+            from palimpsa.models.palimpsa.modeling_palimpsa import Palimpsa
+            return Palimpsa
+
+    # 2. Gated Linear Attention (GLA)
+    elif name == 'gla':
         from fla.layers.gla import GatedLinearAttention
         return GatedLinearAttention
-        
-    elif layer_name.lower() == 'gated_deltanet':
-        # FLA export name usually 'GatedDeltaNet' or 'SimpleGatedDeltaNet'
+
+    # 3. Gated DeltaNet
+    elif name == 'gated_deltanet':
         from fla.layers.gated_deltanet import GatedDeltaNet
         return GatedDeltaNet
     
+    # 4. Standard Attention (Optional fallback)
+    elif name == 'attention':
+        from fla.layers.attn import Attention
+        return Attention
+
     else:
         raise ValueError(f"Unknown layer type: {layer_name}")
 
-# =============================================================================
-# 1. Generic Block Wrapper (Adapts FLA Layers to Zoology Loop)
-# =============================================================================
-class FLABlock(nn.Module):
-    def __init__(self, config, layer_idx):
+
+class UnifiedBlock(nn.Module):
+    """
+    A generic Transformer-style block that composes:
+    Norm -> Mixer (Attn/SSM) -> Residual -> Norm -> MLP -> Residual
+    """
+    def __init__(self, config, layer_idx: int):
         super().__init__()
         self.hidden_size = config.d_model
         
-        # 1. Norms
+        # 1. Layer Norms (using RMSNorm from FLA for speed)
         self.attn_norm = RMSNorm(self.hidden_size, eps=config.layer_norm_epsilon)
         self.mlp_norm = RMSNorm(self.hidden_size, eps=config.layer_norm_epsilon)
 
-        # 2. Attention Layer (Dynamic Loading)
-        # We pass 'layer_name' in the config, defaulting to Palimpsa
-        layer_cls = get_layer_class(getattr(config, 'layer_name', 'palimpsa'))
+        # 2. The Mixer (The "Attention" part)
+        mixer_cls = get_mixer_class(getattr(config, 'layer_name', 'palimpsa'))
         
-        self.attn = layer_cls(
+        # We filter args to ensure we don't pass unused ones if the mixer is simple
+        self.mixer = mixer_cls(
             hidden_size=config.d_model,
             layer_idx=layer_idx,
-            mode='chunk', # Force chunk mode for efficiency
-            # FLA/Palimpsa standard args
+            mode=getattr(config, 'mode', 'chunk'),  # Default to efficient chunk mode
             head_dim=getattr(config, 'head_dim', 64),
             num_heads=getattr(config, 'num_heads', 4),
-            use_short_conv=True
+            # Add specific args here if needed (e.g. use_short_conv for FLA)
+            use_short_conv=True 
         )
 
-        # 3. MLP
+        # 3. The MLP (The "Thinking" part)
+        # FLA layers are just mixers, so we MUST explicitly add the MLP here.
         self.mlp = GatedMLP(
             hidden_size=config.d_model,
-            hidden_ratio=4,
-            # FIXED: Removed 'act_fn' argument as it caused the crash.
-            # FLA GatedMLP defaults to Swish/SiLU automatically.
+            hidden_ratio=getattr(config, 'mlp_expansion_factor', 4),
+            # FLA's GatedMLP uses Swish/SiLU by default
         )
 
-    def forward(self, hidden_states, residual):
-        # Zoology expects: (hidden, residual) -> (hidden, residual)
-        
-        # --- Attention Branch ---
+    def forward(self, hidden_states, residual=None):
+        # 1. Mixer Branch
         normed = self.attn_norm(hidden_states)
         
-        # FLA layers return (output, cache, ...) - we just want output
-        # Some layers might return a single tensor, others a tuple. Handle both.
-        attn_out = self.attn(normed)
-        if isinstance(attn_out, tuple):
-            attn_out = attn_out[0]
+        # Handle FLA layers returning tuples (output, cache)
+        mixer_out = self.mixer(normed)
+        if isinstance(mixer_out, tuple):
+            mixer_out = mixer_out[0]
             
         if residual is None:
             residual = hidden_states
-            hidden_states = attn_out
+            hidden_states = mixer_out
         else:
-            hidden_states = residual + attn_out
+            hidden_states = residual + mixer_out
             residual = hidden_states
 
-        # --- MLP Branch ---
+        # 2. MLP Branch
         normed = self.mlp_norm(hidden_states)
         mlp_out = self.mlp(normed)
         
+        # Standard Pre-Norm Residual connection
         hidden_states = hidden_states + mlp_out
         residual = hidden_states
 
         return hidden_states, residual
 
-# =============================================================================
-# 2. Zoology Backbone (Preserved)
-# =============================================================================
 
 class TokenEmbeddings(nn.Module):
-    def __init__(
-        self,
-        embed_dim,
-        vocab_size,
-        max_position_embeddings,
-        padding_idx=None,
-        word_embed_proj_dim=None,
-        learnable: bool = True,
-        device='cuda',
-        dtype='torch.bfloat16',
-    ):
+    """Standard Learnable Token + Position Embeddings"""
+    def __init__(self, config):
         super().__init__()
-        self.device = device
-        self.dtype = dtype
-        if word_embed_proj_dim is None:
-            self.word_embeddings = nn.Embedding(
-                vocab_size, embed_dim, padding_idx=padding_idx
-            )
-            self.project_in = None
-        else:
-            self.word_embeddings = nn.Embedding(
-                vocab_size, word_embed_proj_dim, padding_idx=padding_idx
-            )
-            self.project_in = nn.Linear(word_embed_proj_dim, embed_dim, bias=False)
-            
-        if not learnable:
+        self.word_embeddings = nn.Embedding(
+            config.vocab_size, config.d_model, padding_idx=None
+        )
+        
+        if not getattr(config, 'learnable_word_embeddings', True):
             self.word_embeddings.weight.requires_grad = False
 
-        self.max_position_embeddings = max_position_embeddings
+        self.max_position_embeddings = config.max_position_embeddings
         if self.max_position_embeddings > 0:
             self.position_embeddings = nn.Embedding(
-                max_position_embeddings, embed_dim
+                config.max_position_embeddings, config.d_model
             )
 
     def forward(self, input_ids, position_ids=None):
         batch_size, seqlen = input_ids.shape
         embeddings = self.word_embeddings(input_ids)
-        if self.project_in is not None:
-            embeddings = self.project_in(embeddings)
             
         if self.max_position_embeddings > 0:
             if position_ids is None:
                 position_ids = torch.arange(
                     seqlen, dtype=torch.long, device=embeddings.device
                 )
-            # Support broadcasting if necessary, though Zoology usually strict
             position_embeddings = self.position_embeddings(position_ids)
             embeddings = embeddings + position_embeddings
+            
         return embeddings
 
-def _init_weights(
-        module,
-        n_layers,
-        block_type,
-        initializer_range=0.02,
-        rescale_prenorm_residual=True,
-        n_residuals_per_layer=1,
-    ):
-        if isinstance(module, (nn.Linear, nn.Conv1d)):
-            nn.init.normal_(module.weight, mean=0.0, std=initializer_range)
-            if module.bias is not None:
-                nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            nn.init.normal_(module.weight, mean=0.0, std=initializer_range)
-        elif hasattr(module, 'reset_parameters'):
-            module.reset_parameters()
 
 class LMBackbone(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.embeddings = TokenEmbeddings(
-            config.d_model, 
-            config.vocab_size, 
-            config.max_position_embeddings,
-            learnable=config.learnable_word_embeddings
-        )
+        self.embeddings = TokenEmbeddings(config)
+        self.layers = nn.ModuleList([
+            UnifiedBlock(config=config, layer_idx=i)
+            for i in range(config.n_layers)
+        ])
         
-        # We use the generic wrapper that checks 'config.layer_name'
-        block_cls = FLABlock
-
-        self.layers = nn.ModuleList(
-            [
-                block_cls(config=config, layer_idx=i)
-                for i in range(config.n_layers)
-            ]
-        )
-        self.drop_f = nn.Dropout(config.resid_dropout)
-        self.ln_f = nn.LayerNorm(config.d_model, eps=config.layer_norm_epsilon)
-        self.apply(partial(_init_weights, n_layers=config.n_layers, block_type="FLABlock"))
+        # Final Norm
+        self.ln_f = RMSNorm(config.d_model, eps=config.layer_norm_epsilon)
+        self.drop_f = nn.Dropout(getattr(config, 'resid_dropout', 0.0))
 
     def forward(self, input_ids, position_ids=None):
-        hidden_states = self.embeddings(input_ids, position_ids=position_ids)
+        hidden_states = self.embeddings(input_ids, position_ids)
         residual = None
+        
         for layer in self.layers:
             hidden_states, residual = layer(hidden_states, residual)
             
+        # Final Residual + Norm
         dropped = self.drop_f(hidden_states)
         residual = (dropped + residual) if residual is not None else dropped
-        hidden_states = self.ln_f(residual.to(dtype=self.ln_f.weight.dtype))
+        hidden_states = self.ln_f(residual)
+        
         return hidden_states
+
+
+def _init_weights(module, n_layers, initializer_range=0.02):
+    """Universal Weight Initialization"""
+    if isinstance(module, nn.Linear):
+        nn.init.normal_(module.weight, mean=0.0, std=initializer_range)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, mean=0.0, std=initializer_range)
+
 
 class LanguageModel(nn.Module):
     def __init__(self, config):
         super().__init__()
-        if config.vocab_size % config.pad_vocab_size_multiple != 0:
-            config.vocab_size += config.pad_vocab_size_multiple - (
-                config.vocab_size % config.pad_vocab_size_multiple
-            )
+        # Pad vocab if necessary for tensor core efficiency
+        pad_multiple = getattr(config, 'pad_vocab_size_multiple', 8)
+        if config.vocab_size % pad_multiple != 0:
+            config.vocab_size += pad_multiple - (config.vocab_size % pad_multiple)
 
-        self.backbone = LMBackbone(config=config)
+        self.backbone = LMBackbone(config)
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
 
-        # Initialize weights 
-        self.apply(partial(_init_weights, n_layers=config.n_layers, block_type="FLABlock"))
-
-        # tie weights
+        # Weight Tying (Optional, but standard for small LMs)
         self.lm_head.weight = self.backbone.embeddings.word_embeddings.weight
-        self.to(torch.bfloat16)
 
-    def forward(
-        self, input_ids, position_ids=None, state=None, labels=None
-    ): 
+        # Init
+        self.apply(partial(_init_weights, n_layers=config.n_layers))
+        self.to(torch.bfloat16) # Default to bf16
+
+    def forward(self, input_ids, position_ids=None, labels=None, state=None): 
         hidden_states = self.backbone(input_ids, position_ids=position_ids)
         logits = self.lm_head(hidden_states)
         
         if labels is not None:
-            # --- FIX: REMOVED SHIFTING LOGIC ---
-            # Zoology dataloader already provides aligned targets (Input[t] -> Label[t])
-            # We compare logits directly to labels.
+            # Flatten for CrossEntropy: [Batch * Seq, Vocab]
             loss_fct = nn.CrossEntropyLoss()
-            
-            # Flatten to [Batch * Seq, Vocab]
             loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1))
             
-            # Return HF-like output
+            # Use a simple namespace/dict to return both
             from collections import namedtuple
             CausalLMOutput = namedtuple("CausalLMOutput", ["logits", "loss"])
             return CausalLMOutput(logits=logits, loss=loss)
 
         return logits
 
-    def state_size(self, sequence_length: int):
-        return "dont care"
+    def state_size(self, sequence_length: int = 0):
+        # Used by Zoology logger, can remain dummy
+        return 0
