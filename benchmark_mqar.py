@@ -191,9 +191,9 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
     x_axis = np.arange(len(mean_error))
 
     # [FIX] Ensure directory exists
-    os.makedirs("results", exist_ok=True)
+    os.makedirs("results_reconstruction", exist_ok=True)
     
-    filename = f"results/results_{run_name}.npz"
+    filename = f"results_reconstruction/results_{run_name}.npz"
     np.savez(filename, mean=mean_error, std=std_error, x=x_axis, name=run_name)
     print(f"\n[Analysis] Stats saved to: {filename}")
     
