@@ -19,6 +19,8 @@ dependencies = [
     "wandb",
     "tyro",
     "lm_eval"
+    "matplotlib",
+    "numpy"
 ]
 
 [tool.setuptools.packages.find]
