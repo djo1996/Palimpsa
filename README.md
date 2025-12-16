@@ -220,11 +220,8 @@ srun torchrun \
 
 ---
 
-## 📊 Benchmarks
+## 📊 Evaluation (Not implemented yet) 
 
-### Language Modeling (FineWeb-Edu)
-- **170M / 340M parameters:** Palimpsa outperforms strong baselines like **Gated DeltaNet** and **Transformer++** on perplexity and zero-shot commonsense reasoning (HellSwag, PIQA).
-- **Scalability:** Uses a fused chunk-wise parallel scan (Triton) to maintain high training throughput.
 
 ---
 
