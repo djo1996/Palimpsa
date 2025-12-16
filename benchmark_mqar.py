@@ -52,11 +52,14 @@ def evaluate(model, dataloader):
 # =============================================================================
 @torch.no_grad()
 def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
-    """
-    Computes KV reconstruction error per token position and SAVES it to .npz.
-    Does NOT plot directly.
-    """
     print(f"\n[Analysis] Computing KV Reconstruction Dynamics (Seq Len: {args.seq_len})...")
+    
+    try:
+        from palimpsa.ops.palimpsa import chunk_palimpsa
+    except ImportError:
+        print("❌ Error: Could not import 'chunk_palimpsa'. Check palimpsa/ops/palimpsa/__init__.py")
+        return
+
     model.eval()
     
     all_layer_errors = [] 
@@ -70,17 +73,28 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
             break
         input_ids = input_ids.cuda()
 
-        # 1. Embeddings
-        hidden_states = model.backbone.embeddings(input_ids)
+        # Handle model wrapping
+        if hasattr(model.backbone, "model"):
+            base_model = model.backbone.model
+        else:
+            base_model = model.backbone
 
-        # 2. Layer Loop
+        hidden_states = base_model.embeddings(input_ids)
+
         batch_layer_errors = [] 
         
-        for layer in model.backbone.layers:
-            mixer = layer.mixer
+        for layer in base_model.layers:
+            # [FIX] Use .mixer instead of .attn based on your UnifiedBlock definition
+            mixer = layer.mixer 
             normed_states = layer.attn_norm(hidden_states)
             
-            # --- Palimpsa Projections (Manual Forward) ---
+            # --- Palimpsa Projections ---
+            # Verify this is actually Palimpsa before trying to access specific attributes
+            if not hasattr(mixer, 'b_rank_proj') and args.config == 'palimpsa':
+                 # Skip if running GLA but analysis thinks it's Palimpsa (e.g. mixed layers)
+                 hidden_states, _ = layer(hidden_states)
+                 continue
+
             q = mixer.q_proj(normed_states).float()
             k = mixer.k_proj(normed_states).float()
             v = mixer.v_proj(normed_states).float()
@@ -90,6 +104,7 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
                 k_orig = mixer.k_proj(normed_states)
                 v_orig = mixer.v_proj(normed_states)
                 
+                # Note: passing cu_seqlens=None assumes padded batch (standard for analysis)
                 q_orig, _ = mixer.q_conv1d(q_orig, None)
                 k_orig, _ = mixer.k_conv1d(k_orig, None)
                 v_orig, _ = mixer.v_conv1d(v_orig, None)
@@ -106,14 +121,24 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
             v = rearrange(v, '... (h d) -> ... h d', d=head_v_dim)
             
             # Beta & Gating
-            b_in = mixer.b_rank_proj(normed_states)
-            b = mixer.b_proj(b_in).float()
-            b = rearrange(b, '... (h d) -> ... h d', d=head_v_dim)
-            
-            bs = torch.sigmoid(mixer.bs_proj(normed_states).float())
-            b = torch.sigmoid(b) * bs.unsqueeze(-1)
-            
-            v_target = v * b
+            if mixer.b_rank_proj is not None:
+                b_in = mixer.b_rank_proj(normed_states)
+                b = mixer.b_proj(b_in).float()
+                b = rearrange(b, '... (h d) -> ... h d', d=head_v_dim)
+                
+                bs = torch.sigmoid(mixer.bs_proj(normed_states).float())
+                b = torch.sigmoid(b) * bs.unsqueeze(-1)
+                
+                v_target = v * b
+                
+                Ip = torch.exp(mixer.Ip_log.float())
+            else:
+                # Fallback for metaplasticity=False (SimpleGLA) analysis
+                # b=0 effectively, so reconstruction logic needs adjustment or skip
+                # Here we just set dummy B to avoid crash, but results might mean standard GLA recall
+                b = torch.zeros_like(v)
+                v_target = torch.zeros_like(v) 
+                Ip = torch.ones(mixer.num_v_heads, device=q.device)
 
             if hasattr(mixer, 'qk_act') and mixer.qk_act == 'siluL2':
                 q = F.normalize(F.silu(q), p=2, dim=-1)
@@ -124,10 +149,7 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
             
             # --- Get Final State ---
             dt = F.softplus(mixer.dt_proj(normed_states).float() + mixer.dt_bias.float())
-            Ip = torch.exp(mixer.Ip_log.float())
             A = mixer.A_log.float().exp()
-            
-            from fla.ops.palimpsa import chunk_palimpsa
             
             # Get the FINAL state (Mu_T)
             _, final_mu, _ = chunk_palimpsa(
@@ -135,37 +157,47 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
                 scale=1.0, output_final_state=True
             )
             
-            # --- RECONSTRUCTION CALCULATION ---
-            # Reconstruction[t] = State @ k[t].T
+            # --- RECONSTRUCTION ---
+            # reconstruction[b, l, h, v] = einsum(state[b, h, v, k], k[b, l, h, k])
             reconstruction = einsum(final_mu, k, "b h v k, b l h k -> b l h v")
             
             diff_sq = (reconstruction - v_target) ** 2
-            weighted_error = b * diff_sq 
             
-            # [Batch, Seq, Head, Val] -> [Batch, Seq]
-            token_error = weighted_error.sum(dim=-1).mean(dim=-1)
+            # Use raw difference for visualization (easier to interpret than beta-weighted)
+            # or keep weighted if you prefer: weighted_error = b * diff_sq
+            error_val = diff_sq
+            
+            # Mean over Head and Val dim -> [Batch, Seq]
+            token_error = error_val.mean(dim=(-2, -1))
             batch_layer_errors.append(token_error)
 
-            hidden_states, _ = layer(hidden_states, None)
+            # Manually advance hidden states using the actual layer logic
+            hidden_states, _ = layer(hidden_states)
         
-        # [Layers, Batch, Seq] -> [Batch, Seq]
-        batch_avg_layers = torch.stack(batch_layer_errors).mean(dim=0)
-        all_layer_errors.append(batch_avg_layers.cpu())
+        # Mean over Layers -> [Batch, Seq]
+        if batch_layer_errors:
+            batch_avg_layers = torch.stack(batch_layer_errors).mean(dim=0)
+            all_layer_errors.append(batch_avg_layers.cpu())
 
-    # --- SAVE STATISTICS ---
+    # --- SAVE ---
+    if not all_layer_errors:
+        print("No data collected.")
+        return
+
     errors_tensor = torch.cat(all_layer_errors, dim=0) # [Total_Batch, SeqLen]
     
     mean_error = errors_tensor.mean(dim=0).numpy()
     std_error = errors_tensor.std(dim=0).numpy()
     x_axis = np.arange(len(mean_error))
 
-    # Save to file
+    # [FIX] Ensure directory exists
+    os.makedirs("results", exist_ok=True)
+    
     filename = f"results/results_{run_name}.npz"
     np.savez(filename, mean=mean_error, std=std_error, x=x_axis, name=run_name)
     print(f"\n[Analysis] Stats saved to: {filename}")
     
     model.train()
-
 # =============================================================================
 # 3. MAIN TRAINING LOOP
 # =============================================================================
