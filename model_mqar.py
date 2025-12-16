@@ -193,7 +193,7 @@ class LanguageModel(nn.Module):
 
         # Init
         self.apply(partial(_init_weights, n_layers=config.n_layers))
-        # self.to(torch.bfloat16) # Default to bf16
+        self.to(torch.bfloat16) # Default to bf16
 
     def forward(self, input_ids, position_ids=None, labels=None, state=None): 
         hidden_states = self.backbone(input_ids, position_ids=position_ids)
