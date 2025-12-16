@@ -161,7 +161,7 @@ def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
             # reconstruction[b, l, h, v] = einsum(state[b, h, v, k], k[b, l, h, k])
             reconstruction = einsum(final_mu, k, "b h v k, b l h k -> b l h v")
             
-            diff_sq = (reconstruction - v_target) ** 2
+            diff_sq = (reconstruction - v) ** 2
             
             # Use raw difference for visualization (easier to interpret than beta-weighted)
             # or keep weighted if you prefer: weighted_error = b * diff_sq
