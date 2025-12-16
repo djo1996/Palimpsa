@@ -14,6 +14,28 @@
 
 ---
 
+## 📂 Repository Structure
+
+The repository is organized to support both research benchmarking (Zoology style) and large-scale pretraining (Flame/Hugging Face style).
+
+```text
+Palimpsa/
+├── benchmark_mqar.py       # Main entry point for MQAR benchmarks
+├── config_mqar.py          # Configs for Palimpsa vs. Baselines (GLA, DeltaNet)
+├── model_mqar.py           # Zoology-style backbone adapter for FLA layers
+├── train_nano.py           # NanoGPT training script
+├── palimpsa/               # Core package source code
+│   ├── layers/             # PyTorch layers implementation
+│   ├── models/             # Hugging Face compatible model definitions
+│   ├── ops/                # Optimized CUDA/Triton kernels
+│   ├── check_palimpsa.py   # Implementation sanity checks
+│   └── integration.py      # Integration utilities
+├── data/
+│   └── data_mqar/          # Rigorous Zoology data generation pipeline
+│       ├── associative_recall.py
+│       └── config.py
+└── ...
+
 ## 🛠️ Installation (Core)
 
 This sets up the core environment required to run the model and the NanoGPT quick start.
