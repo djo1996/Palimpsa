@@ -18,7 +18,6 @@
 
 The repository is organized to support both research benchmarking (Zoology style) and large-scale pretraining (Flame/Hugging Face style).
 
-```text
 Palimpsa/
 ├── benchmark_mqar.py       # Main entry point for MQAR benchmarks
 ├── config_mqar.py          # Configs for Palimpsa vs. Baselines (GLA, DeltaNet)
