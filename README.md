@@ -94,6 +94,22 @@ python train_nano.py --model palimpsa --batch_size 16
 ```
 *You should see the loss dropping within the first few iterations.*
 
+## MQAR (Not finished yet)
+
+Reproduce MQAR benchmark, and KV reconstruction error plot
+
+```bash
+cd Palimpsa
+
+# 1. Training and evaluation
+python benchmark_mqar.py --config palimpsa --seq_len 128 --use_wandb --steps 3000 --batch_size 512
+
+# 2. get the plot
+
+
+```
+*You should see the loss dropping within the first few iterations.*
+
 ---
 
 ## 🔬 Advanced: Research Scale (Flame)
