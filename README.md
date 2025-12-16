@@ -202,7 +202,7 @@ srun torchrun \
     --model.name palimpsa \
     --model.config Palimpsa/configs/palimpsa_170M.json \
     --model.tokenizer_path meta-llama/Llama-2-7b-chat-hf \
-    --optimizer.lr 1.25e-3 \
+    --optimizer.lr 3e-3 \
     --lr_scheduler.warmup_steps 2000 \
     --training.batch_size 1 \
     --training.gradient_accumulation_steps 2 \
