@@ -97,9 +97,11 @@ config_args = dict(
     hidden_size=args.n_embd,
     num_hidden_layers=args.n_layer,
     num_heads=args.n_head,
-    num_kv_heads=args.n_head, # Most linear attentions map KV heads 1:1 or use MQA
+    head_dim= args.n_embd // args.n_head,
     max_position_embeddings=args.block_size,
-    use_cache=False
+    use_cache=False,
+    expand_v = 2,
+    expand_k = 1
 )
 
 
