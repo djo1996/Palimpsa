@@ -2,6 +2,7 @@ import torch
 import argparse
 import wandb
 import os
+import glob
 import math
 import numpy as np
 import matplotlib.pyplot as plt
@@ -47,22 +48,18 @@ def evaluate(model, dataloader):
     return total_loss / steps, total_acc / steps
 
 # =============================================================================
-# 2. ANALYSIS & VISUALIZATION
+# 2. ANALYSIS & SAVING (No Plotting Here)
 # =============================================================================
 @torch.no_grad()
-def analyze_kv_reconstruction_over_time(model, dataloader, args):
+def compute_and_save_reconstruction_stats(model, dataloader, args, run_name):
     """
-    Palimpsa White-Box Analysis.
-    Calculates reconstruction error of KV pairs from the final state per token position.
-    Generates a plot: X-axis = Token Index, Y-axis = Mean Reconstruction Error (with Std Dev Shadow).
+    Computes KV reconstruction error per token position and SAVES it to .npz.
+    Does NOT plot directly.
     """
     print(f"\n[Analysis] Computing KV Reconstruction Dynamics (Seq Len: {args.seq_len})...")
     model.eval()
     
-    # Store errors: List of tensors [Batch, SeqLen]
     all_layer_errors = [] 
-    
-    # We analyze a few batches to get robust stats (e.g., 20 batches)
     num_batches = 20 
     iterator = iter(dataloader)
     
@@ -77,26 +74,22 @@ def analyze_kv_reconstruction_over_time(model, dataloader, args):
         hidden_states = model.backbone.embeddings(input_ids)
 
         # 2. Layer Loop
-        batch_layer_errors = [] # Store error for this batch across all layers
+        batch_layer_errors = [] 
         
         for layer in model.backbone.layers:
             mixer = layer.mixer
             normed_states = layer.attn_norm(hidden_states)
             
             # --- Palimpsa Projections (Manual Forward) ---
-            # Cast to float for precision in analysis
             q = mixer.q_proj(normed_states).float()
             k = mixer.k_proj(normed_states).float()
             v = mixer.v_proj(normed_states).float()
             
-            # Simulate Convolution
             if mixer.use_short_conv:
-                # Re-run projections in original dtype for conv compatibility
                 q_orig = mixer.q_proj(normed_states)
                 k_orig = mixer.k_proj(normed_states)
                 v_orig = mixer.v_proj(normed_states)
                 
-                # Stateless conv on full sequence
                 q_orig, _ = mixer.q_conv1d(q_orig, None)
                 k_orig, _ = mixer.k_conv1d(k_orig, None)
                 v_orig, _ = mixer.v_conv1d(v_orig, None)
@@ -120,10 +113,8 @@ def analyze_kv_reconstruction_over_time(model, dataloader, args):
             bs = torch.sigmoid(mixer.bs_proj(normed_states).float())
             b = torch.sigmoid(b) * bs.unsqueeze(-1)
             
-            # Target Value (What we want to recall)
             v_target = v * b
 
-            # Activation
             if hasattr(mixer, 'qk_act') and mixer.qk_act == 'siluL2':
                 q = F.normalize(F.silu(q), p=2, dim=-1)
                 k = F.normalize(F.silu(k), p=2, dim=-1)
@@ -145,82 +136,40 @@ def analyze_kv_reconstruction_over_time(model, dataloader, args):
             )
             
             # --- RECONSTRUCTION CALCULATION ---
-            # We check how well the FINAL state (at T) can reconstruct the value at time t
-            # given the key at time t.
-            # final_mu shape: (Batch, Head, V_Head_Dim, K_Head_Dim) usually [B, H, V, K]
-            # k shape:        (Batch, Seq, Head, K_Head_Dim)
-            
             # Reconstruction[t] = State @ k[t].T
-            # Einsum: b=batch, h=head, v=val_dim, k=key_dim, l=seq_len
-            # Result: [Batch, Seq, Head, Val_Dim]
             reconstruction = einsum(final_mu, k, "b h v k, b l h k -> b l h v")
             
-            # Diff squared
             diff_sq = (reconstruction - v_target) ** 2
-            
-            # Weighting by beta (optional, but requested "mean of loss")
-            # Usually we want raw reconstruction error to see memory decay
             weighted_error = b * diff_sq 
             
-            # Average over Heads and Val_Dim, KEEP Batch and SeqLen
             # [Batch, Seq, Head, Val] -> [Batch, Seq]
             token_error = weighted_error.sum(dim=-1).mean(dim=-1)
-            
             batch_layer_errors.append(token_error)
 
-            # Move forward in model
             hidden_states, _ = layer(hidden_states, None)
         
-        # Stack layers for this batch: [Layers, Batch, Seq] -> Average over Layers -> [Batch, Seq]
+        # [Layers, Batch, Seq] -> [Batch, Seq]
         batch_avg_layers = torch.stack(batch_layer_errors).mean(dim=0)
         all_layer_errors.append(batch_avg_layers.cpu())
 
-    # --- PLOTTING ---
-    # Concatenate all batches: [Total_Batch, SeqLen]
-    errors_tensor = torch.cat(all_layer_errors, dim=0)
+    # --- SAVE STATISTICS ---
+    errors_tensor = torch.cat(all_layer_errors, dim=0) # [Total_Batch, SeqLen]
     
-    # Stats along batch dimension
     mean_error = errors_tensor.mean(dim=0).numpy()
     std_error = errors_tensor.std(dim=0).numpy()
     x_axis = np.arange(len(mean_error))
 
-    plt.figure(figsize=(12, 6))
+    # Save to file
+    filename = f"results/results_{run_name}.npz"
+    np.savez(filename, mean=mean_error, std=std_error, x=x_axis, name=run_name)
+    print(f"\n[Analysis] Stats saved to: {filename}")
     
-    # 1. Shadow (Std Dev)
-    plt.fill_between(
-        x_axis, 
-        mean_error - std_error, 
-        mean_error + std_error, 
-        color='blue', 
-        alpha=0.15, 
-        label='Batch Std Dev'
-    )
-    
-    # 2. Mean Line
-    plt.plot(x_axis, mean_error, color='blue', linewidth=2, label='Mean Reconstruction Error')
-    
-    plt.title(f"Memory Decay: Reconstruction Error vs Token Position\n(Averaged over Heads & Layers)")
-    plt.xlabel("Token Index (History)")
-    plt.ylabel("Reconstruction Loss")
-    plt.legend(loc='upper left')
-    plt.grid(True, alpha=0.3)
-    
-    # 3. Save and Log
-    plot_filename = f"recon_error_L{args.seq_len}.png"
-    plt.savefig(plot_filename)
-    print(f"[Analysis] Plot saved to {plot_filename}")
-    
-    if args.use_wandb:
-        wandb.log({"analysis/reconstruction_dynamics": wandb.Image(plot_filename)})
-        
-    plt.close()
     model.train()
 
 # =============================================================================
 # 3. MAIN TRAINING LOOP
 # =============================================================================
 def run_training(args, current_seq_len):
-    # Auto-Batch Size Logic
     if args.batch_size is None:
         if current_seq_len >= 1024: batch_size = 64
         elif current_seq_len >= 512: batch_size = 128
@@ -235,63 +184,29 @@ def run_training(args, current_seq_len):
 
     print(f"\n=== Run: {args.config} | Len {current_seq_len} | Batch {batch_size} | Steps {steps_to_run} ===")
 
-    # 1. Config Setup
     if args.config not in MQAR_CONFIGS: raise ValueError(f"Config '{args.config}' not found.")
     model_config = MQAR_CONFIGS[args.config]
     model_config.max_position_embeddings = current_seq_len
     model_config.vocab_size = args.vocab_size
     model_config.d_model = args.d_model
     
-    # 2. Data Preparation
     print("Generating/Loading Data...")
-    mqar_conf_train = MQARConfig(
-        vocab_size=args.vocab_size,
-        input_seq_len=current_seq_len,
-        num_examples=steps_to_run * batch_size,
-        num_kv_pairs=args.num_kv_pairs,
-        power_a=0.01 
-    )
-    mqar_conf_test = MQARConfig(
-        vocab_size=args.vocab_size,
-        input_seq_len=current_seq_len,
-        num_examples=3000, 
-        num_kv_pairs=args.num_kv_pairs,
-        power_a=0.01 
-    )
+    mqar_conf_train = MQARConfig(vocab_size=args.vocab_size, input_seq_len=current_seq_len, num_examples=steps_to_run * batch_size, num_kv_pairs=args.num_kv_pairs, power_a=0.01)
+    mqar_conf_test = MQARConfig(vocab_size=args.vocab_size, input_seq_len=current_seq_len, num_examples=3000, num_kv_pairs=args.num_kv_pairs, power_a=0.01)
 
-    data_config = DataConfig(
-        train_configs=[mqar_conf_train],
-        test_configs=[mqar_conf_test],
-        batch_size=batch_size,
-        cache_dir=os.path.expanduser(args.cache_dir) if args.cache_dir else None
-    )
-
+    data_config = DataConfig(train_configs=[mqar_conf_train], test_configs=[mqar_conf_test], batch_size=batch_size, cache_dir=os.path.expanduser(args.cache_dir) if args.cache_dir else None)
     train_loader, test_loader = prepare_data(data_config)
 
-    # 3. WandB Init
     run_name = f"{args.config}_L{current_seq_len}_D{args.d_model}_KV{args.num_kv_pairs}"
     if args.use_wandb:
-        wandb.init(
-            project="Palimpsa_MQAR_Benchmark", 
-            group=args.config, 
-            name=run_name,
-            config={
-                "seq_len": current_seq_len, 
-                "batch_size": batch_size, 
-                "steps": steps_to_run, 
-                **args.__dict__
-            },
-            reinit=True
-        )
+        wandb.init(project="Palimpsa_MQAR_Benchmark", group=args.config, name=run_name, config={"seq_len": current_seq_len, "batch_size": batch_size, "steps": steps_to_run, **args.__dict__}, reinit=True)
 
-    # 4. Model & Opt
     model = LanguageModel(model_config).cuda()
     print(f"Model Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=steps_to_run, eta_min=0.0)
 
-    # 5. Train Loop
     model.train()
     pbar = tqdm(train_loader, total=steps_to_run, desc=run_name)
     best_val_acc = 0.0
@@ -312,25 +227,19 @@ def run_training(args, current_seq_len):
             train_acc = compute_accuracy(output.logits, labels)
             pbar.set_description(f"{run_name} | Loss: {loss.item():.4f} | Acc: {train_acc:.1%}")
             if args.use_wandb:
-                wandb.log({
-                    "train/loss": loss.item(), 
-                    "train/acc": train_acc, 
-                    "train/lr": scheduler.get_last_lr()[0], 
-                    "step": step
-                })
+                wandb.log({"train/loss": loss.item(), "train/acc": train_acc, "train/lr": scheduler.get_last_lr()[0], "step": step})
 
         if step % 500 == 0 and step > 0:
             val_loss, val_acc = evaluate(model, test_loader)
             if val_acc > best_val_acc: best_val_acc = val_acc
-            if args.use_wandb: 
-                wandb.log({"val/loss": val_loss, "val/acc": val_acc, "step": step})
+            if args.use_wandb: wandb.log({"val/loss": val_loss, "val/acc": val_acc, "step": step})
 
     print(f"Run Finished. Best Val Acc: {best_val_acc:.2%}")
 
-    # 6. Final Analysis
+    # --- SAVE RESULTS ---
     if args.compute_inner_loss and args.config == 'palimpsa':
         try:
-            analyze_kv_reconstruction_over_time(model, test_loader, args)
+            compute_and_save_reconstruction_stats(model, test_loader, args, run_name)
         except Exception as e:
             print(f"Analysis failed with error: {e}")
             import traceback
@@ -340,6 +249,7 @@ def run_training(args, current_seq_len):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # Training Args
     parser.add_argument("--config", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"])
     parser.add_argument("--seq_len", type=int, nargs='+', default=[128, 256, 512])
     parser.add_argument("--d_model", type=int, default=128)
@@ -351,10 +261,9 @@ if __name__ == "__main__":
     parser.add_argument("--cache_dir", type=str, default="./data_cache")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--compute_inner_loss", action="store_true", default=True)
-    
     args = parser.parse_args()
-    
-    # Iterate over sequence lengths
+   
+    # Standard Training
     seq_lens = args.seq_len
     for s in seq_lens:
         args.seq_len = s 
