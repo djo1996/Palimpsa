@@ -133,7 +133,7 @@ uv pip install -e ./flame
 ```
 
 ### 2. Download FineWeb-Edu
-Flame requires the dataset to be cached locally.
+Flame requires the dataset to be cached locally. Do it only once, preferably in sinteractive (faster)
 
 ```bash
 # Run this from the Palimpsa directory
