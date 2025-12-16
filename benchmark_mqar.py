@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 from einops import rearrange, repeat, einsum
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
 
 # --- IMPORTS ---
 try:
@@ -23,80 +23,7 @@ from data.data_mqar.associative_recall import MQARConfig
 from data.data_mqar.utils import prepare_data
 
 # =============================================================================
-# 1. FAST JIT DATASET (Fixes the generation slowness)
-# =============================================================================
-class MQARIterableDataset(IterableDataset):
-    """
-    Generates MQAR samples on-the-fly (Just-In-Time).
-    Eliminates the long wait before training starts.
-    """
-    def __init__(self, vocab_size, seq_len, num_kv_pairs, total_samples, batch_size, power_a=0.01):
-        self.vocab_size = vocab_size
-        self.seq_len = seq_len
-        self.num_kv_pairs = num_kv_pairs
-        self.total_samples = total_samples
-        self.batch_size = batch_size
-        self.power_a = power_a
-
-    def generate_sample(self):
-        # 1. Generate KV pairs
-        # Randomly select keys and values
-        keys = np.random.choice(self.vocab_size, self.num_kv_pairs, replace=False)
-        values = np.random.choice(self.vocab_size, self.num_kv_pairs, replace=True)
-
-        # 2. Interleave them: k1, v1, k2, v2...
-        kv_len = 2 * self.num_kv_pairs
-        if kv_len + 1 > self.seq_len:
-            raise ValueError(f"SeqLen {self.seq_len} too short for {self.num_kv_pairs} KV pairs")
-
-        kv_interleaved = np.empty(kv_len, dtype=int)
-        kv_interleaved[0::2] = keys
-        kv_interleaved[1::2] = values
-
-        # 3. Build Sequence
-        # [k1, v1, ..., kn, vn, filler..., query]
-        input_seq = np.random.choice(self.vocab_size, self.seq_len, replace=True)
-        input_seq[:kv_len] = kv_interleaved
-
-        # 4. Select Query
-        if self.power_a > 0:
-            probs = (np.arange(self.num_kv_pairs) + 1) ** (-self.power_a)
-            probs = probs / probs.sum()
-            idx = np.random.choice(self.num_kv_pairs, p=probs)
-        else:
-            idx = np.random.randint(self.num_kv_pairs)
-
-        query_key = keys[idx]
-        target_val = values[idx]
-
-        input_seq[-1] = query_key
-
-        # 5. Create Labels (Only predict last token)
-        labels = np.full(self.seq_len, -100, dtype=int)
-        labels[-1] = target_val
-        
-        return torch.tensor(input_seq, dtype=torch.long), torch.tensor(labels, dtype=torch.long)
-
-    def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
-        seed_offset = 0
-        if worker_info is not None:
-            seed_offset = worker_info.id
-        
-        # Seed numpy per worker
-        np.random.seed((os.getpid() + seed_offset) % (2**32))
-        
-        # Yield infinite stream up to total limit
-        count = 0
-        while count < self.total_samples:
-            yield self.generate_sample()
-            count += 1
-            
-    def __len__(self):
-        return self.total_samples
-
-# =============================================================================
-# 2. METRICS & ANALYSIS
+# 1. METRICS & ANALYSIS
 # =============================================================================
 def compute_accuracy(logits, labels, ignore_index=-100):
     preds = torch.argmax(logits, dim=-1)
@@ -149,15 +76,32 @@ def analyze_palimpsa_reconstruction(model, dataloader, args):
             normed_states = layer.attn_norm(hidden_states)
             
             # --- Palimpsa Projections ---
-            q = mixer.q_proj(normed_states)
-            k = mixer.k_proj(normed_states)
-            v = mixer.v_proj(normed_states)
+            # NOTE: Model is likely in bfloat16. We cast inputs to float32 for safe analysis math
+            # OR we keep them in bfloat16 but ensure consistency.
+            # Best practice for reconstruction checks: Cast everything to Float32.
             
-            # Conv
+            q = mixer.q_proj(normed_states).float()
+            k = mixer.k_proj(normed_states).float()
+            v = mixer.v_proj(normed_states).float()
+            
+            # Conv (simulate)
             if mixer.use_short_conv:
-                q, _ = mixer.q_conv1d(q, None)
-                k, _ = mixer.k_conv1d(k, None)
-                v, _ = mixer.v_conv1d(v, None)
+                # To simulate conv without state, we need to ensure the conv weights are float32
+                # This is tricky without changing model weights.
+                # Easier: Run conv in original dtype, THEN cast.
+                
+                # Re-run projections in original dtype
+                q_orig = mixer.q_proj(normed_states)
+                k_orig = mixer.k_proj(normed_states)
+                v_orig = mixer.v_proj(normed_states)
+                
+                q_orig, _ = mixer.q_conv1d(q_orig, None)
+                k_orig, _ = mixer.k_conv1d(k_orig, None)
+                v_orig, _ = mixer.v_conv1d(v_orig, None)
+                
+                q = q_orig.float()
+                k = k_orig.float()
+                v = v_orig.float()
             
             # Dimensions
             head_k_dim = mixer.head_k_dim
@@ -168,11 +112,13 @@ def analyze_palimpsa_reconstruction(model, dataloader, args):
             v = rearrange(v, '... (h d) -> ... h d', d=head_v_dim)
             
             # Beta & Gating
-            b = mixer.b_proj(mixer.b_rank_proj(normed_states)).float()
+            # Recalculate B in original dtype then cast
+            b_in = mixer.b_rank_proj(normed_states)
+            b = mixer.b_proj(b_in).float() # Output is typically float anyway in Palimpsa impl?
             b = rearrange(b, '... (h d) -> ... h d', d=head_v_dim)
             
             bs = torch.sigmoid(mixer.bs_proj(normed_states).float())
-            b = torch.sigmoid(b).to(normed_states.dtype) * bs.unsqueeze(-1)
+            b = torch.sigmoid(b) * bs.unsqueeze(-1)
             
             # Apply Beta to Value
             v_target = v * b
@@ -182,31 +128,44 @@ def analyze_palimpsa_reconstruction(model, dataloader, args):
             k = F.softmax(k, dim=-1)
             
             # --- Get Final State ---
-            dt = F.softplus(mixer.dt_proj(normed_states).float() + mixer.dt_bias)
+            # We must use the float32 versions of params for the kernel
+            dt = F.softplus(mixer.dt_proj(normed_states).float() + mixer.dt_bias.float())
             Ip = torch.exp(mixer.Ip_log.float())
             A = mixer.A_log.float().exp()
             
             from palimpsa.ops.palimpsa import chunk_palimpsa
+            
+            # Ensure everything going into kernel is float32 (Palimpsa kernels often require this or match dtypes)
             _, final_mu, _ = chunk_palimpsa(
                 q=q, k=k, v=v_target, b=b, gt=dt, g=A, Ip=Ip,
                 scale=1.0, output_final_state=True
             )
             
-            # --- FIXED EINSUM ---
-            # Palimpsa State (final_mu) shape is (Batch, Head, V, K) [Transposed state]
-            # K shape is (Batch, Seq, Head, K)
-            # Reconstruction = State @ K.T -> (V, K) @ (K, 1) -> V
+            # --- RECONSTRUCTION CALCULATION ---
+            # final_mu: (Batch, Head, V, K) [If using latest Palimpsa]
+            # k: (Batch, Seq, Head, K)
             
-            # b: batch, h: head, v: val_dim, k: key_dim, l: seq_len
+            # Check shapes dynamically to avoid crash if Palimpsa version differs
+            # We expect final_mu to be [B, H, V, K] or [B, H, K, V]
+            # If shape[-1] == k.shape[-1], it is [..., V, K].
+            
+            # Standard Palimpsa State is (K, V) usually.
+            # Let's trust your previous error suggesting mismatch.
+            # If final_mu is (B, H, V, K), then:
+            # Recon = State @ K_transpose
+            # (V, K) @ (K, L) -> (V, L) -> Transpose to (L, V)
+            
+            # EINSUM:
+            # b: batch, h: head, v: val, k: key, l: seq
             reconstruction = einsum(final_mu, k, "b h v k, b l h k -> b l h v")
             
             diff_sq = (reconstruction - v_target) ** 2
-            weighted_error = b * diff_sq # Weighted by beta
+            weighted_error = b * diff_sq 
             token_error = weighted_error.sum(dim=(-2, -1)).mean()
             
             layer_errors[i].append(token_error.item())
 
-            # Continue forward
+            # Continue forward (in original dtype for the model)
             hidden_states, _ = layer(hidden_states, None)
 
     print("\n" + "="*40)
@@ -221,7 +180,7 @@ def analyze_palimpsa_reconstruction(model, dataloader, args):
     model.train()
 
 # =============================================================================
-# 3. MAIN TRAINING LOOP
+# 2. MAIN TRAINING LOOP
 # =============================================================================
 def run_training(args, current_seq_len):
     # Auto-Batch Size
@@ -233,7 +192,7 @@ def run_training(args, current_seq_len):
     else:
         batch_size = args.batch_size
 
-    # Auto-Steps (Match Zoology 6.4M tokens)
+    # Steps calculation (Zoology match)
     target_examples = 6_400_000
     total_steps = int(target_examples / batch_size)
     steps_to_run = args.steps if args.steps > 0 else total_steps
@@ -247,27 +206,34 @@ def run_training(args, current_seq_len):
     model_config.vocab_size = args.vocab_size
     model_config.d_model = args.d_model
     
-    # 2. Fast Training Data
-    print("Initializing Fast Data Generator...")
-    train_dataset = MQARIterableDataset(
+    # 2. Prepare Data (Standard / Cached)
+    print("Generating/Loading Data (This might take a moment)...")
+    mqar_conf_train = MQARConfig(
         vocab_size=args.vocab_size,
-        seq_len=current_seq_len,
+        input_seq_len=current_seq_len,
+        num_examples=steps_to_run * batch_size, # Full size
         num_kv_pairs=args.num_kv_pairs,
-        total_samples=steps_to_run * batch_size,
-        batch_size=batch_size
+        power_a=0.01 
     )
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, num_workers=4, pin_memory=True)
-
-    # 3. Test Data (Standard Static)
-    print("Preparing Test Set...")
     mqar_conf_test = MQARConfig(
-        vocab_size=args.vocab_size, input_seq_len=current_seq_len,
-        num_examples=3000, num_kv_pairs=args.num_kv_pairs, power_a=0.01 
+        vocab_size=args.vocab_size,
+        input_seq_len=current_seq_len,
+        num_examples=3000, 
+        num_kv_pairs=args.num_kv_pairs,
+        power_a=0.01 
     )
-    test_data_config = DataConfig(train_configs=[], test_configs=[mqar_conf_test], batch_size=batch_size, cache_dir=args.cache_dir)
-    _, test_loader = prepare_data(test_data_config)
 
-    # 4. WandB
+    data_config = DataConfig(
+        train_configs=[mqar_conf_train],
+        test_configs=[mqar_conf_test],
+        batch_size=batch_size,
+        cache_dir=os.path.expanduser(args.cache_dir) if args.cache_dir else None
+    )
+
+    # This will block until data is ready
+    train_loader, test_loader = prepare_data(data_config)
+
+    # 3. WandB
     run_name = f"{args.config}_L{current_seq_len}_D{args.d_model}_KV{args.num_kv_pairs}"
     if args.use_wandb:
         wandb.init(
@@ -276,20 +242,19 @@ def run_training(args, current_seq_len):
             reinit=True
         )
 
-    # 5. Model
+    # 4. Model
     model = LanguageModel(model_config).cuda()
     print(f"Model Params: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=steps_to_run, eta_min=0.0)
 
-    # 6. Train
+    # 5. Train
     model.train()
     pbar = tqdm(train_loader, total=steps_to_run, desc=run_name)
     best_val_acc = 0.0
 
-    # Note: IterableDataset yields batches directly, no 'slices'
-    for step, (input_ids, labels) in enumerate(pbar):
+    for step, (input_ids, labels, _) in enumerate(pbar):
         if step >= steps_to_run: break
         
         input_ids, labels = input_ids.cuda(), labels.cuda()
@@ -314,12 +279,14 @@ def run_training(args, current_seq_len):
 
     print(f"Run Finished. Best Val Acc: {best_val_acc:.2%}")
 
-    # 7. Analysis
+    # 6. Analysis
     if args.compute_inner_loss and args.config == 'palimpsa':
         try:
             analyze_palimpsa_reconstruction(model, test_loader, args)
         except Exception as e:
             print(f"Analysis failed with error: {e}")
+            import traceback
+            traceback.print_exc()
     
     if args.use_wandb: wandb.finish()
 
@@ -339,8 +306,8 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Fix manual arg update for seq_len in analysis
+    # Iterate safely
     seq_lens = args.seq_len
     for s in seq_lens:
-        args.seq_len = s # Update single value for the run
+        args.seq_len = s 
         run_training(args, s)
