@@ -58,6 +58,6 @@ class PalimpsaBlock(nn.Module):
         hidden_states = self.norm(residual.to(dtype=self.norm.weight.dtype))
         if self.residual_in_fp32:
             residual = residual.to(torch.float32)
-        hidden_states = self.mixer(hidden_states, inference_params=inference_params)
-        return hidden_states, residual
+        hidden_states, _, _ = self.mixer(hidden_states, inference_params=inference_params)
+        return hidden_states, residual  
 
