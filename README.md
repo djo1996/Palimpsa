@@ -20,7 +20,6 @@ The repository supports research benchmarking (Zoology style) and large-scale pr
 
 ```text
 Palimpsa/
-├── fla/                    # Optimized CUDA/Triton kernels
 ├── zoology/                # Research framework for associative recall
 │   ├── mqar_figure/        # Sweep configs for MQAR benchmarks
 │   ├── mixers/             # Palimpsa & GatedDeltaNet adapters
