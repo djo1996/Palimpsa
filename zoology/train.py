@@ -191,7 +191,6 @@ def train(config: TrainConfig):
     set_determinism(config.seed)
     
     logger = WandbLogger(config)
-    logger.log_config(config)
     config.print()
 
     train_dataloader, test_dataloader = prepare_data(config.data)
