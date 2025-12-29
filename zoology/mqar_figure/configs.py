@@ -93,7 +93,8 @@ for input_seq_len, num_kv_pairs in [
             for sequence_mixer in [
                 "Palimpsa", "GatedDeltaNet"
             ]:
-
+                block_type = "PalimpsaBlock"
+                print(block_type)
                 
                 model = ModelConfig(
                     d_model=d_model,
