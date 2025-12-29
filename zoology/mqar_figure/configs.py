@@ -71,7 +71,6 @@ for input_seq_len, num_kv_pairs in [
                 "GatedDeltaNet": dict(
                     name="zoology.mixers.gated_delta_net.GatedDeltaNet",   
                     wargs={
-                        "hidden_size": d_model,
                         "head_dim": d_model // 4, 
                         "num_heads": 4,           
                         "expand_v": 1,            
@@ -81,7 +80,6 @@ for input_seq_len, num_kv_pairs in [
                 "Palimpsa": dict(
                     name="zoology.mixers.palimpsa.Palimpsa",
                     kwargs={
-                        "hidden_size": d_model,
                         "head_dim": d_model // 4, 
                         "num_heads": 4,           
                         "expand_v": 1,            
