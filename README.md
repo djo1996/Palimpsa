@@ -5,7 +5,7 @@
 ### Learning to Remember, Learn, and Forget in Attention-Based Models
 
 [![Paper](https://img.shields.io/badge/Paper-Under%20Review-blue)](https://arxiv.org/abs/2504.13569)
-[![Framework](https://img.shields.io/badge/Built%20On-Zoology%20%26%20FLA-firebrick)](https://github.com/hazy-research/zoology)
+[![Framework](https://img.shields.io/badge/Built%20On-Flame%20%26%20FLA-firebrick)](https://github.com/fla-org/flame)
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
 </div>
@@ -16,86 +16,125 @@
 
 ## 📂 Repository Structure
 
-The repository is structured to handle both synthetic associative recall benchmarks (Zoology) and optimized linear attention kernels (FLA).
+The repository supports research benchmarking (Zoology style) and large-scale pretraining (Flame/Hugging Face style).
 
 ```text
 Palimpsa/
-├── fla/                    # Optimized CUDA/Triton kernels for Palimpsa
+├── fla/                    # Optimized CUDA/Triton kernels
 ├── zoology/                # Research framework for associative recall
-│   ├── mqar_figure/        # Sweep configurations for MQAR benchmarks
-│   ├── mixers/             # Palimpsa & GatedDeltaNet layer wrappers
-│   ├── launch.py           # Main entry point for running sweeps
-│   └── train.py            # Core training loop logic
-├── cache/                  # Local directory for generated MQAR datasets
-└── ...
+│   ├── mqar_figure/        # Sweep configs for MQAR benchmarks
+│   ├── mixers/             # Palimpsa & GatedDeltaNet adapters
+│   ├── launch.py           # Sweep entry point
+│   └── train.py            # Training loop logic
+├── palimpsa/               # Core package source code
+│   ├── layers/             # PyTorch layers implementation
+│   ├── models/             # Hugging Face compatible models
+│   └── integration.py      # Flame engine integration
+├── data/                   # Data preparation scripts
+└── cache/                  # Generated datasets (local)
 ```
 
-## 🛠️ Installation & Environment
+## 🛠️ Installation
 
-### 1. Shell Configuration (W&B)
-To ensure the logger works across both private clusters (like FZ-Juelich) and public clouds, add these to your `~/.bashrc`. This keeps your API keys and private URLs out of the codebase.
+### 1. Environment & W&B Setup
+To keep the code clean and cluster-agnostic, configure your environment variables in your `~/.bashrc`. This ensures the logger works on private clusters without code changes.
 
 ```bash
-# Add to the end of your ~/.bashrc
-export WANDB_API_KEY="your_key_here"
-export WANDB_BASE_URL="[https://wandb.fz-juelich.de](https://wandb.fz-juelich.de)"  # Or [https://api.wandb.ai](https://api.wandb.ai)
-export WANDB_ENTITY="your_username"
+# Add to ~/.bashrc
+export WANDB_API_KEY=your_key_here
+export WANDB_BASE_URL=your_cluser_url # Or https://api.wandb.ai
+export WANDB_ENTITY=your_username
 
-# Then reload your shell
+# Reload shell
 source ~/.bashrc
 ```
 
-### 2. Set Up Environment
+### 2. Workspace & Dependencies
+We use `uv` for high-speed dependency management inside a standard virtual environment.
+
 ```bash
-# 1. Create and Activate a Standard Venv
+mkdir Palimpsa_Lab && cd Palimpsa_Lab
+
+# Clone Projects
+git clone https://github.com/djo1996/Palimpsa.git
+git clone https://github.com/fla-org/flash-linear-attention.git
+
+# Set Up Venv
 python3 -m venv palimpsa_env
 source palimpsa_env/bin/activate
+pip install uv
 
-# 2. Install core dependencies
-pip install -e .
+# Install Build Tools & Kernels
+uv pip install ninja packaging setuptools wheel
+uv pip install causal-conv1d
+uv pip install -e ./flash-linear-attention
+uv pip install -e ./Palimpsa
 ```
 
 ---
 
-## 🚀 Running MQAR Benchmarks
+## 🚀 Quick Start: Shakespeare (NanoGPT)
 
-Palimpsa is integrated with the Zoology launch system. You can run individual sweeps or full benchmarks using the following command structure:
+Verify kernel compilation and model convergence on the Shakespeare character-level dataset.
 
 ```bash
-# From the project root
-python3 -m zoology.launch zoology/mqar_figure/configs.py
+cd Palimpsa
+python data/shakespeare_char/prepare.py
+python train_nano.py --model palimpsa --batch_size 16
 ```
 
-### Reproducing Figure 2 (MQAR)
-The `configs.py` file contains the hyperparameters for benchmarking Palimpsa against Gated Delta Networks (GDN) and other baselines. 
-- **Sequence Lengths:** 512, 1024
-- **Model Dimension:** 128
-- **Learning Rate:** 0.01
+---
+
+## 📊 MQAR Benchmarking (Zoology)
+
+Reproduce the Multi-Query Associative Recall (MQAR) results using the Zoology-integrated sweep system.
+
+```bash
+# Run the MQAR figure sweep
+python3 -m zoology.launch zoology/mqar_figure/configs.py
+```
+*Datasets are automatically generated and stored in the local `cache/` directory.*
 
 ---
 
 ## 🔬 Advanced: Research Scale (Flame)
 
-Palimpsa is also compatible with the [Flame](https://github.com/fla-org/flame) engine for large-scale pretraining.
+To train Large Language Models (LLMs) using the [Flame](https://github.com/fla-org/flame) engine:
 
-### Launch Training (Slurm)
-For H100/A100 clusters using Slurm, ensure your environment variables are correctly exported in your batch script before running `torchrun`.
+### 1. Install Flame Engine
+```bash
+cd Palimpsa_Lab
+git clone https://github.com/fla-org/flame.git
+uv pip install git + https://github.com/pytorch/torchtitan.git@0b44d4c
+uv pip install -e ./flame
+```
+### 2. Download FineWeb-Edu
+Flame requires the dataset to be cached locally. Do it only once, preferably in sinteractive (faster)
+
+```bash
+# Run this from the Palimpsa directory
+cd Palimpsa
+python data/download_fineweb.py --cache_dir /Local/your_name/.cache
+```
+
+### 3. Launch Training (Slurm)
+Ensure your Slurm script exports the necessary environment variables. The logger will automatically pick up your `WANDB_ENTITY` and `WANDB_BASE_URL`.
 
 ```bash
 srun torchrun \
     --nnodes=$SLURM_JOB_NUM_NODES \
     --nproc_per_node=8 \
     Palimpsa/train.py \
+    --job.config_file flame/flame/models/fla.toml \
     --model.name palimpsa \
-    --training.seq_len 32768 \
-    --training.dataset HuggingFaceFW/fineweb-edu
+    --model.config Palimpsa/configs/palimpsa_170M.json \
+    --training.dataset HuggingFaceFW/fineweb-edu \
+    --training.seq_len 32768
 ```
 
 ---
 
 ## 📜 Citation
-
-If you use this codebase or the Palimpsa architecture in your research, please cite:
 
 ```bibtex
 @article{bonnet2025palimpsa,
