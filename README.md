@@ -13,26 +13,21 @@
 **Palimpsa** is a novel attention mechanism that views In-Context Learning (ICL) as a continual learning problem. It introduces **Bayesian Metaplasticity** to transformer architectures—dynamically adjusting the plasticity of memory states based on their uncertainty.
 
 ---
-
 ## 📂 Repository Structure
 
-The repository supports research benchmarking (Zoology style) and large-scale pretraining (Flame/Hugging Face style).
+The repository is organized to support both MQAR research benchmarks and large-scale pretraining using the Flame engine.
 
 ```text
-Palimpsa/
-├── zoology/                # Research framework for associative recall
-│   ├── mqar_figure/        # Sweep configs for MQAR benchmarks
-│   ├── mixers/             # Palimpsa & GatedDeltaNet adapters
-│   ├── launch.py           # Sweep entry point
-│   └── train.py            # Training loop logic
-├── palimpsa/               # Core package source code
-│   ├── layers/             # PyTorch layers implementation
-│   ├── models/             # Hugging Face compatible models
-│   └── integration.py      # Flame engine integration
-├── data/                   # Data preparation scripts
-└── cache/                  # Generated datasets (local)
+Palimpsa_Lab/
+├── Palimpsa/               # Main Research Repo
+│   ├── palimpsa/           # Core library (layers, models)
+│   │   └── integration.py  # Flame/Torch-Titan plugin registry
+│   ├── config/             # Model architecture JSONs
+│   ├── zoology/            # MQAR/Associative recall benchmarks
+│   └── train.py            # Unified training entry point
+├── flame/                  # Training engine (submodule/clone)
+└── flash-linear-attention/ # Fused kernels (submodule/clone)
 ```
-
 ## 🛠️ Installation
 
 ### 1. Environment & W&B Setup
@@ -121,19 +116,41 @@ python data/download_fineweb.py --cache_dir /Local/your_name/.cache
 
 ### 3. Launch Training (Slurm)
 Ensure your Slurm script exports the necessary environment variables. The logger will automatically pick up your `WANDB_ENTITY` and `WANDB_BASE_URL`.
-
+#### 1. Configure Environment
+Set your cluster-specific paths and W&B credentials:
 ```bash
-srun torchrun \
-    --nnodes=$SLURM_JOB_NUM_NODES \
-    --nproc_per_node=8 \
-    Palimpsa/train.py \
-    --job.config_file flame/flame/models/fla.toml \
-    --model.name palimpsa \
-    --model.config Palimpsa/configs/palimpsa_170M.json \
-    --training.dataset HuggingFaceFW/fineweb-edu \
-    --training.seq_len 32768
+export HF_DATASETS_CACHE="/path/to/your/cache"
+export WANDB_PROJECT="Palimpsa"
 ```
 
+#### 2. Launching via Torchrun
+You can run the training directly or via an interactive session.
+
+```bash
+torchrun --nproc_per_node=4 \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint=localhost:0 \
+    Palimpsa/train.py \
+    --job.config_file flame/flame/models/fla.toml \
+    --job.dump_folder exp/palimpsa-170M \
+    --model.name palimpsa \
+    --model.config Palimpsa/config/palimpsa_170M.json \
+    --model.tokenizer_path meta-llama/Llama-2-7b-chat-hf \
+    --optimizer.lr 3e-3 \
+    --lr_scheduler.warmup_steps 2000 \
+    --training.batch_size 1 \
+    --training.gradient_accumulation_steps 4 \
+    --training.seq_len 32768 \
+    --training.context_len 4096 \
+    --training.varlen \
+    --training.steps 30000 \
+    --training.dataset HuggingFaceFW/fineweb-edu \
+    --training.dataset_name sample-100BT \
+    --training.dataset_split train \
+    --training.num_workers 8 \
+    --checkpoint.interval 2000 \
+    --metrics.log_freq 10
+```
 ---
 
 ## 📜 Citation
