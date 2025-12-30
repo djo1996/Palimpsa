@@ -69,8 +69,7 @@ uv pip install -e ./Palimpsa
 
 ## 🚀 Quick Start: Shakespeare (NanoGPT)
 
-Verify kernel compilation and model convergence on the Shakespeare character-level dataset.
-
+Verify model convergence on the Shakespeare dataset. Logic adapted from [Longhorn](https://github.com/Cranial-XIX/longhorn).
 ```bash
 cd Palimpsa
 python data/shakespeare_char/prepare.py
@@ -81,8 +80,7 @@ python train_nano.py --model palimpsa --batch_size 16
 
 ## 📊 MQAR Benchmarking (Zoology)
 
-Reproduce the Multi-Query Associative Recall (MQAR) results using the Zoology-integrated sweep system.
-
+Reproduce Multi-Query Associative Recall (MQAR) results using the [Zoology](https://github.com/HazyResearch/zoology) repository.
 ```bash
 # Run the MQAR figure sweep
 python3 -m zoology.launch zoology/mqar_figure/configs.py
