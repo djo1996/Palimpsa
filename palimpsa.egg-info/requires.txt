@@ -1,9 +1,0 @@
-torch>=2.8.0
-triton>=3.4.0
-transformers>=4.55.0
-einops>=0.8.1
-ninja
-packaging
-wandb
-flash-linear-attention@ git+https://github.com/fla-org/flash-linear-attention.git@main
-flame@ git+https://github.com/fla-org/flame.git@main

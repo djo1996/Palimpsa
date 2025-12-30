@@ -14,6 +14,7 @@ from torch.nn import functional as F
 from fla.layers.utils import get_unpad_data, index_first_axis, pad_input
 from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
 from palimpsa.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa
+from fla.ops.simple_gla import chunk_simple_gla, fused_recurrent_simple_gla
 
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
@@ -35,7 +36,7 @@ class Palimpsa(nn.Module):
         num_heads: int = 6,
         num_v_heads: int = None,
         beta_step_rank: int = 128,
-        attn_mode: str = 'chunk',
+        mode: str = 'chunk',
         use_gate: bool = True,
         use_short_conv: bool = True,
         allow_neg_eigval: bool = False,
@@ -43,11 +44,28 @@ class Palimpsa(nn.Module):
         conv_bias: bool = False,
         layer_idx: int = None,
         norm_eps: float = 1e-5,
+        qk_act: str = 'softmax',
+        metaplasticity: bool = True,
+        finetuning: bool = False,
         **kwargs,
     ) -> Palimpsa:
         super().__init__()
 
-        self.mode = attn_mode
+        self.qk_act = qk_act 
+        self.metaplasticity = metaplasticity
+        self.finetuning = finetuning
+
+        if self.qk_act != 'softmax':
+            warnings.warn(
+                f"⚠️  Palimpsa is using non-standard query/key activation: '{self.qk_act}'"
+            )
+        if not self.metaplasticity:
+             warnings.warn("⚠️  Palimpsa is running in SimpleGLA mode (Metaplasticity=False).")
+        
+        if self.finetuning:
+             warnings.warn("⚠️  Palimpsa is running in FINETUNING mode (Special b_proj Init Active).")
+
+        self.mode = mode
         self.allow_neg_eigval = allow_neg_eigval
         self.hidden_size = hidden_size
         self.expand_v = expand_v
@@ -69,7 +87,6 @@ class Palimpsa(nn.Module):
         self.value_dim = int(self.num_v_heads * self.head_v_dim)
         self.layer_idx = layer_idx
 
-        # Consistency check
         if not math.isclose(self.num_v_heads * self.head_dim * expand_v, self.value_dim, rel_tol=1e-5):
             raise ValueError(f"Invalid value_dim configuration.")
         if self.num_v_heads > self.num_heads and self.num_v_heads % self.num_heads != 0:
@@ -77,28 +94,40 @@ class Palimpsa(nn.Module):
                 f"num_v_heads={self.num_v_heads} must be divisible by num_heads={self.num_heads}.",
             )
 
-        # Linear Projections
         self.q_proj = nn.Linear(hidden_size, self.key_dim, bias=False)
         self.k_proj = nn.Linear(hidden_size, self.key_dim, bias=False)
         self.v_proj = nn.Linear(hidden_size, self.value_dim, bias=False)
 
-        # Beta & Decay Projections
         self.b_rank_proj = nn.Linear(hidden_size, self.beta_step_rank, bias=False)
         self.b_proj = nn.Linear(self.beta_step_rank, self.value_dim, bias=True)
-        # Assuming bs_proj scales per head (adjust output dim if it is per-channel)
+        
+        if self.finetuning:
+            beta_min = 0.001
+            beta_max = 0.1
+            beta_init_floor = 1e-4
+            b_val = torch.exp(
+                torch.rand(self.value_dim) * (math.log(beta_max) - math.log(beta_min))
+                + math.log(beta_min),
+            )
+            b_val = torch.clamp(b_val, min=beta_init_floor)
+            inv_b_val = b_val + torch.log(-torch.expm1(-b_val))
+            
+            with torch.no_grad():
+                self.b_proj.bias.copy_(inv_b_val)
+            
+            self.b_proj.bias._no_weight_decay = True
+            self.b_proj.bias._no_reinit = True
+
         self.bs_proj = nn.Linear(hidden_size, self.num_heads, bias=False)
+        self.Ip_log = nn.Parameter(torch.zeros(self.num_v_heads), requires_grad=False)
+        self.Ip_log._no_weight_decay = True
+
         self.dt_proj = nn.Linear(hidden_size, self.num_heads, bias=False)
 
-        # Parameter Init
         A = torch.empty(self.num_v_heads, dtype=torch.float32).uniform_(0, 16)
         self.A_log = nn.Parameter(torch.log(A))
         self.A_log._no_weight_decay = True
         
-        # Ip log parameter (Assuming it is used in kernels)
-        self.Ip_log = nn.Parameter(torch.zeros(self.num_v_heads))
-        self.Ip_log._no_weight_decay = True
-
-        # DT Init
         dt_min = 0.001
         dt_max = 0.1
         dt_init_floor = 1e-4
@@ -116,13 +145,13 @@ class Palimpsa(nn.Module):
                 hidden_size=self.key_dim,
                 kernel_size=conv_size,
                 bias=conv_bias,
-                activation='silu',
+                activation=None,
             )
             self.k_conv1d = ShortConvolution(
                 hidden_size=self.key_dim,
                 kernel_size=conv_size,
                 bias=conv_bias,
-                activation='silu',
+                activation=None,
             )
             self.v_conv1d = ShortConvolution(
                 hidden_size=self.value_dim,
@@ -153,14 +182,9 @@ class Palimpsa(nn.Module):
         **kwargs: Unpack[dict],
     ) -> tuple[torch.Tensor, torch.Tensor | None, Cache | None]:
         if attention_mask is not None:
-            assert len(attention_mask.shape) == 2, (
-                "Expected attention_mask as a 0-1 matrix with shape [batch_size, seq_len] "
-                "for padding purposes (0 indicating padding). "
-                "Arbitrary attention masks of shape [batch_size, seq_len, seq_len] are not allowed."
-            )
+            assert len(attention_mask.shape) == 2, "Expected attention_mask as a 0-1 matrix..."
 
         batch_size, q_len, _ = hidden_states.shape
-        # Mode selection logic
         mode = 'fused_recurrent' if (q_len <= 64 and not self.training) else self.mode
         if self.training:
             assert mode == 'chunk', "Only chunk mode is supported in training."
@@ -169,13 +193,11 @@ class Palimpsa(nn.Module):
         if past_key_values is not None and len(past_key_values) > self.layer_idx:
             last_state = past_key_values[self.layer_idx]
 
-        # [CRITICAL FOR FLAME] Handle Varlen Packing
         cu_seqlens = kwargs.get('cu_seqlens')
         if attention_mask is not None:
             indices, cu_seqlens, _ = get_unpad_data(attention_mask[:, -q_len:])
             hidden_states = index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices).unsqueeze(0)
 
-        # 1. Projections & Conv
         if self.use_short_conv:
             conv_state_q, conv_state_k, conv_state_v = None, None, None
             if last_state is not None:
@@ -204,89 +226,117 @@ class Palimpsa(nn.Module):
             k = self.k_proj(hidden_states)
             v = self.v_proj(hidden_states)
 
-        # 2. Beta, DT, A, Ip Setup
-        b = self.b_proj(self.b_rank_proj(hidden_states)).float()
-        
-        # Rearrange to heads
         q, k = map(lambda x: rearrange(x, '... (h d) -> ... h d', d=self.head_k_dim), (q, k))
-        v, b = map(lambda x: rearrange(x, '... (h d) -> ... h d', d=self.head_v_dim), (v, b))
+        v = rearrange(v, '... (h d) -> ... h d', d=self.head_v_dim)
 
         if self.num_v_heads > self.num_heads:
             q, k = map(lambda x: repeat(x, '... h d -> ... (h g) d', g=self.num_v_heads // self.num_heads), (q, k))
 
-        bs = torch.sigmoid(self.bs_proj(hidden_states).float())
-        bs = bs.to(hidden_states.dtype)
-        
         dt = F.softplus(self.dt_proj(hidden_states).float() + self.dt_bias)
-        # init = math.log(0.1 / (1 - 0.1))
-        # b = torch.sigmoid(b+init).to(hidden_states.dtype) 
-        # b = b * bs.unsqueeze(-1)
-        # b = 0 * b + 1 
-        # b = b * bs.unsqueeze(-1)
-        # v = v * bs.unsqueeze(-1)
-        b = torch.sigmoid(b).to(hidden_states.dtype) 
-        b = b * bs.unsqueeze(-1)
-        v = v * b
-
-        Ip = torch.exp(self.Ip_log.float())
         A = self.A_log.float().exp()
 
-        # 3. Core Attention Kernel
+        if self.qk_act =='softmax':
+            q = F.softmax(q, dim=-1)
+            k = F.softmax(k, dim=-1)
+        elif self.qk_act == 'siluL2':
+            q = F.normalize(F.silu(q), p=2, dim=-1)
+            k = F.normalize(F.silu(k), p=2, dim=-1)
+        elif self.qk_act == 'siluL2softmax':
+            q = F.normalize(F.silu(q), p=2, dim=-1)
+            k = F.softmax(k, dim=-1)
+        elif self.qk_act == 'silu':
+            q = F.silu(q)
+            k = F.silu(k)
+        else:
+            raise ValueError(f"qk_act={self.qk_act} not a valid entry.")
+
         
-        # [FIX] Unpack state into Mu and I components
-        active_mu, active_I = None, None
-        if last_state is not None:
-            # Assuming 'recurrent_state' is stored as a tuple (Mu, I) in the cache
-            state_tuple = last_state.get('recurrent_state')
-            if state_tuple is not None:
-                active_mu, active_I = state_tuple
+        bs = torch.sigmoid(self.bs_proj(hidden_states).float())
+        bs = bs.to(hidden_states.dtype)
+        v = v * bs.unsqueeze(-1)
 
-        q = F.softmax(q, dim=-1)
-        k = F.softmax(k, dim=-1)
+        if not self.metaplasticity:
+            g_log = -dt * A 
+            recurrent_state = None
+            if last_state is not None:
+                recurrent_state = last_state.get('recurrent_state')
 
-        if mode == 'chunk':
-            outputs = chunk_palimpsa(
-                q=q, 
-                k=k, 
-                v=v, 
-                b=b, 
-                gt=dt, 
-                g=A, 
-                Ip=Ip,
-                scale=1.0,
-                output_final_state=use_cache,
-                cu_seqlens=cu_seqlens,
-            )
-            if use_cache:
-                o, final_mu, final_I = outputs
-                recurrent_state = (final_mu, final_I)
+            if mode == 'chunk':
+                outputs = chunk_simple_gla(
+                    q=q, k=k, v=v, g=g_log,
+                    scale=1.0, 
+                    initial_state=recurrent_state,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                )
+            elif mode == 'fused_recurrent':
+                outputs = fused_recurrent_simple_gla(
+                    q=q, k=k, v=v, g=g_log,
+                    scale=1.0,
+                    initial_state=recurrent_state,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                )
+            else:
+                raise NotImplementedError(f"Mode `{mode}` not supported for simple_gla.")
+            
+            if isinstance(outputs, tuple):
+                o = outputs[0]
+                final_state = outputs[1]
             else:
                 o = outputs
-                recurrent_state = None
-                
-        elif mode == 'fused_recurrent':
-            o, final_mu, final_I = fused_recurrent_palimpsa(
-                q=q, 
-                k=k,
-                v=v, 
-                b=b, 
-                gt=dt, 
-                g=A, 
-                Ip=Ip,
-                initial_mu_state=active_mu,
-                initial_I_state=active_I,
-                output_final_state=use_cache,
-                cu_seqlens=cu_seqlens,
-                scale=1.0,
-            )
-            if use_cache:
-                recurrent_state = (final_mu, final_I)
-            else:
-                recurrent_state = None
-        else:
-            raise NotImplementedError(f"Not supported mode `{mode}`.")
+                final_state = None
 
-        # 4. Update Cache
+            recurrent_state = final_state if use_cache else None
+
+        else:
+            b = self.b_proj(self.b_rank_proj(hidden_states)).float()
+            b = rearrange(b, '... (h d) -> ... h d', d=self.head_v_dim)
+            b = torch.sigmoid(b).to(hidden_states.dtype) 
+            b = b * bs.unsqueeze(-1)
+            
+
+            Ip = torch.exp(self.Ip_log.float())
+
+            active_mu, active_I = None, None
+            if last_state is not None:
+                state_tuple = last_state.get('recurrent_state')
+                if state_tuple is not None:
+                    active_mu, active_I = state_tuple
+
+            if mode == 'chunk':
+                outputs = chunk_palimpsa(
+                    q=q, k=k, v=v, b=b, gt=dt, g=A, Ip=Ip,
+                    scale=1.0,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                    chunk_size=8,
+                )
+                if use_cache:
+                    o, final_mu, final_I = outputs
+                    recurrent_state = (final_mu, final_I)
+                else:
+                    o = outputs
+                    recurrent_state = None
+                    
+            elif mode == 'fused_recurrent':
+                outputs = fused_recurrent_palimpsa(
+                    q=q, k=k, v=v, b=b, gt=dt, g=A, Ip=Ip,
+                    initial_mu_state=active_mu,
+                    initial_I_state=active_I,
+                    output_final_state=use_cache,
+                    cu_seqlens=cu_seqlens,
+                    scale=1.0,
+                )
+                if use_cache:
+                    o, final_mu, final_I = outputs
+                    recurrent_state = (final_mu, final_I)
+                else:
+                    o = outputs
+                    recurrent_state = None
+            else:
+                raise NotImplementedError(f"Not supported mode `{mode}`.")
+
         if past_key_values is not None:
             past_key_values.update(
                 recurrent_state=recurrent_state,
@@ -295,7 +345,6 @@ class Palimpsa(nn.Module):
                 offset=q_len,
             )
 
-        # 5. Output Norm & Gate
         if self.use_gate:
             g = rearrange(self.g_proj(hidden_states), '... (h d) -> ... h d', d=self.head_v_dim)
             o = self.o_norm(o, g)
@@ -305,7 +354,6 @@ class Palimpsa(nn.Module):
         o = rearrange(o, 'b t h d -> b t (h d)')
         o = self.o_proj(o)
 
-        # [CRITICAL FOR FLAME] Repadding
         if attention_mask is not None:
             o = pad_input(o.squeeze(0), indices, batch_size, q_len)
 
