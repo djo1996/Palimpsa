@@ -141,12 +141,12 @@ torchrun --nproc_per_node=4 \
     --training.seq_len 32768 \
     --training.context_len 4096 \
     --training.varlen \
-    --training.steps 30000 \
+    --training.steps 3000 \
     --training.dataset HuggingFaceFW/fineweb-edu \
     --training.dataset_name sample-100BT \
     --training.dataset_split train \
     --training.num_workers 8 \
-    --checkpoint.interval 2000 \
+    --checkpoint.interval 200 \
     --metrics.log_freq 10
 ```
 ---
