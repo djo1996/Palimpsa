@@ -18,7 +18,7 @@ dependencies = [
     "packaging",
     "wandb",
     "tyro",
-    "lm_eval"
+    "lm_eval",
     "matplotlib",
     "numpy"
 ]
