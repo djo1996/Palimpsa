@@ -102,9 +102,12 @@ To train Large Language Models (LLMs) using the [Flame](https://github.com/fla-o
 
 ### 1. Install Flame Engine
 ```bash
-# Run this from the Palimpsa_Lab directory
+# Ensure you are in Palimpsa_Lab, NOT the Palimpsa repo
+cd ..
+```
+```bash
 git clone https://github.com/fla-org/flame.git
-uv pip install git + https://github.com/pytorch/torchtitan.git@0b44d4c
+uv pip install git+https://github.com/pytorch/torchtitan.git@0b44d4c
 uv pip install -e ./flame
 ```
 ### 2. Download FineWeb-Edu
