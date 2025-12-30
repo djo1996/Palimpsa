@@ -97,8 +97,8 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
                     max_epochs=64,
                     run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr}",
                     logger=LoggerConfig(
-                        project_name="BMA_MQAR_64",
-                        entity=os.environ.get("WANDB_ENTITY", "d-bonnet") # Cluster fallback
+                        project_name="Palimpsa_MQAR",
+                        entity=os.environ.get("WANDB_ENTITY")
                     )
                 )
                 configs.append(config)
