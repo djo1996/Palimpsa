@@ -13,7 +13,7 @@
   "conv_size": 4,
   "eos_token_id": 2,
   "expand_v": 1,
-  "fuse_linear_cross_entropy": true,
+  "fuse_cross_entropy": true,
   "head_dim": 48,
   "hidden_act": "swish",
   "hidden_ratio": 4,
