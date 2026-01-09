@@ -13,7 +13,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 from fla.layers.attn import Attention
-from fla.layers.palimpsa import Palimpsa
+from palimpsa.layers.palimpsa import Palimpsa
 from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
