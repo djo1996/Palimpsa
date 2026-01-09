@@ -22,7 +22,7 @@ class PalimpsaConfig(PretrainedConfig):
         head_dim: int = 256,
         num_heads: int = 6,
         num_v_heads: Optional[int] = None,
-        attn_mode: str = "chunk", 
+        mode: str = "chunk", # [FIX] Explicitly defined mode. Default to 'chunk' for training stability.
         max_position_embeddings: int = 2048,
         hidden_ratio: Optional[int] = 4,
         intermediate_size: Optional[int] = None,
@@ -39,9 +39,13 @@ class PalimpsaConfig(PretrainedConfig):
         fuse_norm: bool = True,
         fuse_swiglu: bool = True,
         fuse_cross_entropy: bool = True,
-        fuse_linear_cross_entropy: bool = False,
         use_l2warp: bool = False,
         vocab_size: int = 32000,
+        qk_act: str = "softmax",
+        metaplasticity: bool = True,
+        finetuning: bool = False,
+        gumbel_temp: float=0.5,
+        k_temp: float=1,
         **kwargs
     ):
         self.hidden_size = hidden_size
@@ -53,11 +57,14 @@ class PalimpsaConfig(PretrainedConfig):
         self.head_dim = head_dim
         self.num_heads = num_heads
         self.num_v_heads = num_v_heads
-        self.attn_mode = attn_mode
-        
-        # This logic is fine, but 'auto' is a magic string.
+        self.mode = mode
+        self.qk_act = qk_act
+        self.metaplasticity = metaplasticity
+        self.finetuning = finetuning 
+        self.gumbel_temp = gumbel_temp
+        self.k_temp = k_temp
+
         self.beta_step_rank = math.ceil(self.hidden_size / 16) if beta_step_rank == "auto" else beta_step_rank
-        
         self.max_position_embeddings = max_position_embeddings
         self.hidden_ratio = hidden_ratio
         self.intermediate_size = intermediate_size
@@ -71,23 +78,9 @@ class PalimpsaConfig(PretrainedConfig):
         self.fuse_norm = fuse_norm
         self.fuse_swiglu = fuse_swiglu
         self.fuse_cross_entropy = fuse_cross_entropy
-        self.fuse_linear_cross_entropy = fuse_linear_cross_entropy
         self.use_l2warp = use_l2warp
         self.vocab_size = vocab_size
         self.allow_neg_eigval = allow_neg_eigval
-
-
-        if fuse_cross_entropy and fuse_linear_cross_entropy:
-            raise ValueError(
-                "`fuse_cross_entropy` and `fuse_linear_cross_entropy` cannot be True at the same time.",
-            )
-        if fuse_linear_cross_entropy:
-            warnings.warn(
-                "`fuse_linear_cross_entropy` is enabled, which can improves memory efficiency "
-                "at the potential cost of reduced precision. "
-                "If you observe issues like loss divergence, consider disabling this setting.",
-            )
-
 
         if attn is not None:
             if not isinstance(attn, Dict):

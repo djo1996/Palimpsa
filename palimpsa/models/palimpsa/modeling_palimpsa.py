@@ -13,8 +13,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 from fla.layers.attn import Attention
-from palimpsa.layers import Palimpsa
-from palimpsa.models.palimpsa import PalimpsaConfig
+from fla.layers.palimpsa import Palimpsa
+from fla.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
 from fla.modules import GatedMLP as GatedDeltaNetMLP
@@ -65,7 +65,12 @@ class PalimpsaBlock(GradientCheckpointingLayer):
                 allow_neg_eigval=config.allow_neg_eigval,
                 conv_size=config.conv_size,
                 norm_eps=config.norm_eps,
-                layer_idx=layer_idx
+                layer_idx=layer_idx,
+                qk_act=config.qk_act,
+                metaplasticity=getattr(config, "metaplasticity", True),
+                finetuning=getattr(config, "finetuning", False),
+                gumbel_temp=getattr(config, "gumbel_temp", 0.5),
+                k_temp=getattr(config, "k_temp", 1)
             )
         self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
         self.mlp = GatedDeltaNetMLP(
@@ -141,11 +146,17 @@ class PalimpsaPreTrainedModel(PreTrainedModel):
                 
                 # Beta projection initialization
                 if hasattr(module, 'b_proj'):
-                    p = module.b_proj.weight
-                    std = module.beta_step_rank**-0.5 
-                    nn.init.uniform_(p, -std, std)
-                    if module.b_proj.bias is not None:
-                        nn.init.zeros_(module.b_proj.bias)
+                    if getattr(self.config, 'finetuning', False):
+                        # [NEW SCALE INIT] Target the metaplasticity scale instead of bias
+                        nn.init.uniform_(module.b_scale.data, 0.1, 1)
+                        # Weight Init (Xavier-like)
+                        std = module.beta_step_rank**-0.5
+                        nn.init.uniform_(module.b_proj.weight.data, -std, std)
+                    else:
+                        # Standard path: Start with unit scale
+                        nn.init.ones_(module.b_scale)
+                        std = module.beta_step_rank**-0.5 
+                        nn.init.uniform_(module.b_proj.weight.data, -std, std)
 
         elif isinstance(module, (nn.Linear, nn.Conv1d)):
             nn.init.normal_(module.weight, mean=0.0, std=self.config.initializer_range)
