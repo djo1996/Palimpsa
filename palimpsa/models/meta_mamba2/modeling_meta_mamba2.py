@@ -34,7 +34,6 @@ class MetaMamba2Cache(Cache):
         self.head_dim = config.head_dim
         self.state_size = config.state_size
 
-        # Standard Mamba2/SSM Conv State
         self.conv_states = torch.zeros(
             config.num_hidden_layers,
             batch_size,
@@ -43,9 +42,6 @@ class MetaMamba2Cache(Cache):
             device=device,
             dtype=dtype,
         )
-        
-        # Bayesian States: Mu (SSM state) and I (Importance/Information matrix)
-        # Mu: [layers, B, H, D, N]
         self.mu_states = torch.zeros(
             config.num_hidden_layers,
             batch_size,
@@ -55,8 +51,6 @@ class MetaMamba2Cache(Cache):
             device=device,
             dtype=dtype,
         )
-        # I: [layers, B, H, N, N]
-        # Note: This can be memory intensive if state_size is large.
         self.I_states = torch.zeros(
             config.num_hidden_layers,
             batch_size,
@@ -86,6 +80,13 @@ class MetaMamba2Cache(Cache):
 @dataclass
 class MetaMamba2Output(ModelOutput):
     last_hidden_state: torch.FloatTensor | None = None
+    cache_params: MetaMamba2Cache | None = None
+    hidden_states: tuple[torch.FloatTensor] | None = None
+
+@dataclass
+class MetaMamba2CausalLMOutput(ModelOutput):
+    loss: torch.FloatTensor | None = None
+    logits: torch.FloatTensor | None = None
     cache_params: MetaMamba2Cache | None = None
     hidden_states: tuple[torch.FloatTensor] | None = None
 
@@ -135,16 +136,14 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
     config_class = MetaMamba2Config
     base_model_prefix = "backbone"
     _no_split_modules = ["MetaMamba2Block"]
+    supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
         if isinstance(module, MetaMamba2):
             with torch.no_grad():
-                # Init A_log exactly like Mamba2/Palimpsa
                 A = torch.arange(1, module.num_heads + 1)
                 module.A_log.copy_(torch.log(A))
                 nn.init.ones_(module.D)
-                
-                # Bayesian weight initialization (neutral start)
                 if hasattr(module, 'b_proj'):
                     std = module.beta_step_rank**-0.5
                     nn.init.uniform_(module.b_proj.weight, -std, std)
@@ -152,7 +151,6 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
                         nn.init.uniform_(module.b_scale, 0.1, 1.0)
                     else:
                         nn.init.ones_(module.b_scale)
-        
         elif isinstance(module, (nn.Linear, nn.Conv1d)):
             nn.init.normal_(module.weight, std=self.config.initializer_range)
             if module.bias is not None:
@@ -166,16 +164,31 @@ class MetaMamba2Model(MetaMamba2PreTrainedModel):
         self.norm_f = RMSNorm(config.hidden_size, eps=config.norm_eps)
         self.post_init()
 
-    def forward(self, input_ids=None, cache_params=None, use_cache=None, attention_mask=None, **kwargs):
-        hidden_states = self.embeddings(input_ids)
+    def forward(self, input_ids=None, inputs_embeds=None, cache_params=None, use_cache=None, output_hidden_states=None, return_dict=None, attention_mask=None, **kwargs):
+        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        if inputs_embeds is None:
+            inputs_embeds = self.embeddings(input_ids)
+        hidden_states = inputs_embeds
         
         if use_cache and cache_params is None:
-            cache_params = MetaMamba2Cache(self.config, input_ids.size(0), device=hidden_states.device, dtype=hidden_states.dtype)
+            cache_params = MetaMamba2Cache(self.config, inputs_embeds.size(0), device=hidden_states.device, dtype=hidden_states.dtype)
 
+        all_hidden_states = () if output_hidden_states else None
         for layer in self.layers:
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
             hidden_states = layer(hidden_states, cache_params=cache_params, attention_mask=attention_mask, use_cache=use_cache, **kwargs)
         
-        return MetaMamba2Output(last_hidden_state=self.norm_f(hidden_states), cache_params=cache_params)
+        hidden_states = self.norm_f(hidden_states)
+        if output_hidden_states:
+            all_hidden_states += (hidden_states,)
+
+        if not return_dict:
+            return tuple(v for v in [hidden_states, cache_params, all_hidden_states] if v is not None)
+
+        return MetaMamba2Output(last_hidden_state=hidden_states, cache_params=cache_params, hidden_states=all_hidden_states)
 
 class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
     def __init__(self, config):
@@ -184,14 +197,37 @@ class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.post_init()
 
-    def forward(self, input_ids=None, labels=None, **kwargs):
-        outputs = self.backbone(input_ids, **kwargs)
-        hidden_states = outputs.last_hidden_state
+    def forward(self, input_ids=None, inputs_embeds=None, labels=None, cache_params=None, output_hidden_states=None, return_dict=None, use_cache=None, attention_mask=None, **kwargs):
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        outputs = self.backbone(
+            input_ids=input_ids, 
+            inputs_embeds=inputs_embeds,
+            cache_params=cache_params,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            use_cache=use_cache,
+            attention_mask=attention_mask,
+            **kwargs
+        )
+        hidden_states = outputs[0] if not return_dict else outputs.last_hidden_state
         logits = self.lm_head(hidden_states)
         
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, self.config.vocab_size), labels.view(-1))
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
 
-        return MetaMamba2Output(loss=loss, logits=logits, cache_params=outputs.cache_params)
+        if not return_dict:
+            output = (logits,) + outputs[1:]
+            return (loss,) + output if loss is not None else output
+
+        return MetaMamba2CausalLMOutput(
+            loss=loss, 
+            logits=logits, 
+            cache_params=outputs.cache_params,
+            hidden_states=outputs.hidden_states
+        )
