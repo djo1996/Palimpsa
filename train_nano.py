@@ -15,7 +15,7 @@ from contextlib import nullcontext
 from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
 from palimpsa.models.meta_mamba2.configuration_meta_mamba2 import MetaMamba2Config
-from palimpsa.models.meta_mamba2.modeling_met_mamba2 import MetaMamba2ForCausalLM
+from palimpsa.models.meta_mamba2.modeling_meta_mamba2 import MetaMamba2ForCausalLM
 # Import FLA baselines dynamically to avoid crashing if FLA isn't installed
 try:
     from fla.models import GLAForCausalLM, GLAConfig
@@ -102,7 +102,7 @@ config_args = dict(
     max_position_embeddings=args.block_size,
     use_cache=False,
     expand_v = 2,
-    expand_k = 1
+    expand_k = 1,
 )
 
 
