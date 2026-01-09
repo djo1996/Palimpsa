@@ -132,7 +132,7 @@ else: # GLA / GatedDeltaNet
 
 
 
-config = ConfigClass(**config_kargs)
+config = ConfigClass(**config_kwargs)
 model = ModelClass(config)
 model.to(args.device)
 
