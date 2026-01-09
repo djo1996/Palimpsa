@@ -11,7 +11,7 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import ModelOutput, logging
 from transformers.utils.deprecation import deprecate_kwarg
 
-from palimpsa.models.configuration_meta_mamba2 import MetaMamba2Config
+from palimpsa.models.meta_mamba2.configuration_meta_mamba2 import MetaMamba2Config
 from palimpsa.layers.meta_mamba2 import MetaMamba2 
 from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
