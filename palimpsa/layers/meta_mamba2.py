@@ -198,8 +198,8 @@ class MetaMamba2(nn.Module):
         C, B = map(lambda x: rearrange(x, '... (h d) -> ... h d', d=self.ssm_state_size), (C, B))
         x = rearrange(x, '... (h d) -> ... h d', d=self.head_dim)
 
-        if self.num_heads > self.num_groups:
-            C, B = map(lambda x: repeat(x, '... h d -> ... (h g) d', g=self.num_heads // self.num_groups), (C, B))
+        if self.num_heads > self.n_groups:
+            C, B = map(lambda x: repeat(x, '... h d -> ... (h g) d', g=self.num_heads // self.n_groups), (C, B))
 
         dt = F.softplus(dt.float() + self.dt_bias)
         dt = torch.clamp(dt, self.time_step_limit[0], self.time_step_limit[1])
