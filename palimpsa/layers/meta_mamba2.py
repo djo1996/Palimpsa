@@ -294,6 +294,8 @@ class MetaMamba2(nn.Module):
                 offset=q_len
             )
         o = (o + x * self.D[None,None,:,None]).to(o.dtype)
+        # 2. Flatten o back to [B, L, intermediate_size] to match Mamba2 y
+        o = rearrange(o, 'b l h d -> b l (h d)')
         o = self.norm(o, gate)
         if attention_mask is not None:
             o = pad_input(o.squeeze(0), indices, batch_size, q_len)
