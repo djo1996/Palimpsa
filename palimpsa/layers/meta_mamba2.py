@@ -293,12 +293,20 @@ class MetaMamba2(nn.Module):
                 layer_idx=self.layer_idx,
                 offset=q_len
             )
-        o = (o + x * self.D[None,None,:,None]).to(o.dtype)
+        # 1. Add the skip connection (D) while still in 4D [B, L, H, D]
+        o = (o + x * self.D[None, None, :, None])
+
         # 2. Flatten o back to [B, L, intermediate_size] to match Mamba2 y
         o = rearrange(o, 'b l h d -> b l (h d)')
+
+        # 3. Now o and gate are both [B, L, 768]. The norm will be happy.
         o = self.norm(o, gate)
+
+        # 4. Final projection
+        o = self.out_proj(o.to(hidden_states.dtype))
         if attention_mask is not None:
             o = pad_input(o.squeeze(0), indices, batch_size, q_len)
+        
         return o, None, past_key_values
 
 
