@@ -14,7 +14,8 @@ from contextlib import nullcontext
 # --- Imports ---
 from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from palimpsa.models.palimpsa.modeling_palimpsa import PalimpsaForCausalLM
-
+from palimpsa.models.meta_mamba2.configuration_meta_mamba2 import MetaMamba2Config
+from palimpsa.models.meta_mamba2.modeling_met_mamba2 import MetaMamba2ForCausalLM
 # Import FLA baselines dynamically to avoid crashing if FLA isn't installed
 try:
     from fla.models import GLAForCausalLM, GLAConfig
@@ -24,7 +25,7 @@ except ImportError:
 
 def get_args():
     parser = argparse.ArgumentParser(description="Train Palimpsa/FLA on Shakespeare")
-    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "gla", "gated_deltanet"], help="Model architecture")
+    parser.add_argument("--model", type=str, default="palimpsa", choices=["palimpsa", "meta_mamba2", "gla", "gated_deltanet"], help="Model architecture")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--block_size", type=int, default=256, help="Context length")
     parser.add_argument("--n_layer", type=int, default=6, help="Number of layers")

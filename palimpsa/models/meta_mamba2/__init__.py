@@ -2,12 +2,12 @@
 
 from transformers import AutoConfig, AutoModel, AutoModelForCausalLM
 
-from fla.models.mamba2.configuration_mamba2 import Mamba2Config
-from fla.models.mamba2.modeling_mamba2 import Mamba2ForCausalLM, Mamba2Model
+from .configuration_meta_mamba2 import MetaMamba2Config
+from .modeling_meta_mamba2 import MetaMamba2Block, MetaMamba2ForCausalLM, MetaMamba2Model
 
-AutoConfig.register(Mamba2Config.model_type, Mamba2Config, exist_ok=True)
-AutoModel.register(Mamba2Config, Mamba2Model, exist_ok=True)
-AutoModelForCausalLM.register(Mamba2Config, Mamba2ForCausalLM, exist_ok=True)
+# Registering the Meta-Mamba2 architecture into Transformers
+AutoConfig.register(MetaMamba2Config.model_type, MetaMamba2Config, exist_ok=True)
+AutoModel.register(MetaMamba2Config, MetaMamba2Model, exist_ok=True)
+AutoModelForCausalLM.register(MetaMamba2Config, MetaMamba2ForCausalLM, exist_ok=True)
 
-
-__all__ = ['Mamba2Config', 'Mamba2ForCausalLM', 'Mamba2Model']
+__all__ = ['MetaMamba2Config', 'MetaMamba2ForCausalLM', 'MetaMamba2Model', 'MetaMamba2Block']
