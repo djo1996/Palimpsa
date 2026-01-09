@@ -93,6 +93,14 @@ MODEL_REGISTRY = {
 print(f"Initializing {args.model}...")
 ConfigClass, ModelClass = MODEL_REGISTRY[args.model]
 
+# Base args shared by everyone
+config_kwargs = {
+    "vocab_size": meta_vocab_size,
+    "hidden_size": args.n_embd,
+    "num_hidden_layers": args.n_layer,
+    "use_cache": False,
+}
+
 # Common config args
 if args.model == "meta_mamba2":
     # Mamba2 Specifics
