@@ -170,15 +170,8 @@ class MetaMamba2(nn.Module):
         # Set up dimensions for reshapes later
         batch_size, seq_len, _ = hidden_states.shape
         groups_time_state_size = self.n_groups * self.ssm_state_size
-        d_mlp = (
-            projected_states.shape[-1]
-            - 2 * self.intermediate_size
-            - 2 * self.n_groups * self.ssm_state_size
-            - self.num_heads
-        ) // 2
-
         gate, x_B_C, dt = projected_states.split(
-            [d_mlp, self.conv_dim, self.num_heads], dim=-1
+            [self.intermediate_size, self.conv_dim, self.num_heads], dim=-1
         )
 
         # 2. Convolution sequence transformation
