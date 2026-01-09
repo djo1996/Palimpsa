@@ -68,6 +68,12 @@ class MetaMamba2(nn.Module):
              warnings.warn("⚠️ MetaMamba2 running in Mamba2 mode (Metaplasticity=False).")
         if self.finetuning:
              warnings.warn("⚠️ MetaMamba2 running in FINETUNING mode.")
+        if not math.isclose(self.num_heads * self.head_dim, self.intermediate_size, rel_tol=1e-5):
+            raise ValueError(
+                f"Mamba2 Logic Error: num_heads ({self.num_heads}) * head_dim ({self.head_dim}) = {self.num_heads * self.head_dim}, "
+                f"but intermediate_size (hidden_size * expand) is {self.intermediate_size}. "
+                f"These must match for the SSD projection to split correctly."
+        )
 
         #num_heads equivalent to num_v_heads in gated deltanet 
         self.num_heads = num_heads 

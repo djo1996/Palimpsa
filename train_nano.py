@@ -94,17 +94,33 @@ print(f"Initializing {args.model}...")
 ConfigClass, ModelClass = MODEL_REGISTRY[args.model]
 
 # Common config args
-config_args = dict(
-    vocab_size=meta_vocab_size,
-    hidden_size=args.n_embd,
-    num_hidden_layers=args.n_layer,
-    num_heads=args.n_head,
-    head_dim= args.n_embd // args.n_head,
-    max_position_embeddings=args.block_size,
-    use_cache=False,
-    expand_v = 2,
-    expand_k = 1,
-)
+if args.model == "meta_mamba2":
+    # Mamba2 Specifics
+    # SSD requires: num_heads * head_dim = hidden_size * expand
+    # If we want to keep args.n_head, we must adjust head_dim to cover the expansion
+    expand = 2
+    config_kwargs.update({
+        "num_heads": args.n_head,
+        "expand": expand,
+        "head_dim": (args.n_embd * expand) // args.n_head, 
+        "state_size": 32,
+        "n_groups": 1,
+        "metaplasticity": True
+    })
+elif args.model == "palimpsa":
+    config_kwargs.update({
+        "num_heads": args.n_head,
+        "head_dim": args.n_embd // args.n_head,
+        "expand_v": 2,
+        "reduct_k": 1,
+        "qk_act": "softmax",
+        "metaplasticity": True
+    })
+else: # GLA / GatedDeltaNet
+    config_kwargs.update({
+        "num_heads": args.n_head,
+        "head_dim": args.n_embd // args.n_head,
+    })
 
 
 
