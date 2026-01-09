@@ -14,7 +14,7 @@ from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 from fla.layers.attn import Attention
 from fla.layers.palimpsa import Palimpsa
-from fla.models.palimpsa.configuration_palimpsa import PalimpsaConfig
+from palimpsa.models.palimpsa.configuration_palimpsa import PalimpsaConfig
 from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
 from fla.modules import GatedMLP as GatedDeltaNetMLP

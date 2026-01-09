@@ -11,9 +11,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import ModelOutput, logging
 from transformers.utils.deprecation import deprecate_kwarg
 
-from .configuration_meta_mamba2 import MetaMamba2Config
-# Assumes the layer we refined is in a local file or fla.layers
-from .layer_meta_mamba2 import MetaMamba2 
+from palimpsa.models.configuration_meta_mamba2 import MetaMamba2Config
+from palimpsa.layers.meta_mamba2 import MetaMamba2 
 from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
 from fla.modules.l2warp import l2_warp
