@@ -83,6 +83,12 @@ if os.path.exists(meta_path):
         meta = pickle.load(f)
     meta_vocab_size = meta['vocab_size']
 
+MODEL_REGISTRY = {
+    "palimpsa": (PalimpsaConfig, PalimpsaForCausalLM),
+    "gla": (GLAConfig, GLAForCausalLM),
+    "gated_deltanet": (GatedDeltaNetConfig, GatedDeltaNetForCausalLM),
+    "meta_mamba2": (MetaMamba2Config, MetaMamba2ForCausalLM),
+}
 
 print(f"Initializing {args.model}...")
 ConfigClass, ModelClass = MODEL_REGISTRY[args.model]
