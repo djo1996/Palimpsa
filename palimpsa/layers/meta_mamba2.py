@@ -16,7 +16,7 @@ from fla.layers.utils import get_unpad_data, index_first_axis, pad_input
 from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
 from fla.modules.layernorm_gated import RMSNormGated
 from fla.modules.activations import ACT2FN
-from fla.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa
+from palimpsa.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa
 from fla.ops.simple_gla import chunk_simple_gla, fused_recurrent_simple_gla
 import wandb 
 
