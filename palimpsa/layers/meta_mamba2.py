@@ -98,7 +98,7 @@ class MetaMamba2(nn.Module):
 
         self.conv_dim = self.intermediate_size + 2 * self.n_groups * self.ssm_state_size
         
-        self.conv1d =ShortConvolution(hidden_size=self.conv_dim, kernel_size=conv_kernel, bias=use_conv_bias, activation=self.act)
+        self.conv1d =ShortConvolution(hidden_size=self.conv_dim, kernel_size=conv_kernel, bias=use_conv_bias, activation=hidden_act)
         # projection of the input hidden states
         projection_size = self.intermediate_size + self.conv_dim + self.num_heads
         self.in_proj = nn.Linear(
