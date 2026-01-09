@@ -220,7 +220,7 @@ class MetaMamba2(nn.Module):
         # So we do the operation on the x and on b. If b is multiply by dt**2 it's as if we multiplied k by dt. Else b is multiply by dt.   
 
 
-        dx = x * dt.unsqueeze(-1)
+        dx = (x * dt.unsqueeze(-1)).to(x.dtype)
 
         b = torch.ones(1, device=C.device) 
         if self.metaplasticity:
