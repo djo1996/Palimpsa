@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from zoology.config import TrainConfig, ModelConfig, DataConfig, LoggerConfig
 from zoology.data.associative_recall import MQARConfig
-import datetime
+from datetime import datetime
 
 # =================================================================
 # 1. Environment & Seed Setup
@@ -28,7 +28,7 @@ VOCAB_SIZE = 8_192
 CACHE_DIR = os.path.join(os.getcwd(), "cache/mqar")
 
 configs = []
-for input_seq_len, num_kv_pairs in [(128, 64), (256, 64), (512, 64), (1024, 64)]:
+for input_seq_len, num_kv_pairs in [(128, 32), (256, 32), (512, 32), (1024, 32)]:
     if input_seq_len == 1024:
         batch_size = 64
     else:

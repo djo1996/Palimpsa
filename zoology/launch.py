@@ -21,6 +21,12 @@ def worker_fn(gpu_id, task_queue, sweep_name):
     sys.stderr = log_file
 
     print(f"[{datetime.now()}] Worker-GPU{gpu_id} started.")
+    try:
+        train(config=config)
+        print(f"FINISHED: {config.run_id}")
+    except Exception as e:
+        # Using repr(e) instead of str(e) to catch AssertionError
+        print(f"FAILED: {config.run_id}\nError Type: {type(e).__name__}\nError details: {repr(e)}")
 
     while True:
         config = task_queue.get()
