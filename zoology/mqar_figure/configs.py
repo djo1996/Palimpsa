@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from zoology.config import TrainConfig, ModelConfig, DataConfig, LoggerConfig
 from zoology.data.associative_recall import MQARConfig
+import datetime
 
 # =================================================================
 # 1. Environment & Seed Setup
@@ -101,12 +102,13 @@ for input_seq_len, num_kv_pairs in [(128, 64), (256, 64), (512, 64), (1024, 64)]
                     state_mixer=dict(name="torch.nn.Identity", kwargs={})
                 )
 
+                run_timestamp = datetime.now().strftime("%m%d")
                 config = TrainConfig(
                     model=model,
                     data=data,
                     learning_rate=lr,
                     max_epochs=64,
-                    run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr:.2e}",
+                    run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr:.2e}-{run_timestamp}",
                     logger=LoggerConfig(
                         project_name="Palimpsa_MQAR",
                         entity=os.environ.get("WANDB_ENTITY")

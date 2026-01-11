@@ -22,12 +22,16 @@ class WandbLogger:
             # Only login if a key is provided; otherwise assume local machine is already 'wandb login'ed
             wandb.login(key=wandb_key, host=wandb_host)
 
+        run_dir = os.path.join(os.getcwd(), "wandb_metadata", config.run_id)
+        os.makedirs(run_dir, exist_ok=True)
         # 3. Initialize Run using the Config values
         self.run = wandb.init(
             entity=config.logger.entity,
             project=config.logger.project_name,
             name=config.run_id,
-            config=config.model_dump()
+            dir=run_dir,      # Force isolation
+            reinit=True,      # Allow multiple inits in the same process tree
+            config=config.model_dump(),
         )
 
     def log_model(self, model: LanguageModel, config: TrainConfig):
