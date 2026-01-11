@@ -83,7 +83,9 @@ python train_nano.py --model palimpsa --batch_size 16
 Reproduce Multi-Query Associative Recall (MQAR) results using the [Zoology](https://github.com/HazyResearch/zoology) repository.
 ```bash
 # Run the MQAR figure sweep
-python3 -m zoology.launch zoology/mqar_figure/configs.py
+python3 -m zoology.launch zoology/mqar_figure/configs.py --name palimpsa_sweep
+# If you have severals GPUS your nodes
+python3 -m zoology.launch zoology/mqar_figure/configs.py --gpus 0,1,2,3 --name palimpsa_sweep
 ```
 *Datasets are automatically generated and stored in the local `cache/` directory.*
 
