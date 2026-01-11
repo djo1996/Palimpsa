@@ -23,7 +23,14 @@ import wandb
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
     from fla.models.utils import Cache
+    
+import torch.distributed as dist
 
+def is_master():
+    """Returns True if not in a distributed environment OR if rank is 0."""
+    if not dist.is_available() or not dist.is_initialized():
+        return True
+    return dist.get_rank() == 0
 
 class MetaMamba2(nn.Module):
     """
@@ -236,7 +243,7 @@ class MetaMamba2(nn.Module):
                 br_std = self.b_rank_proj.weight.std().item()
                 bp_std = self.b_proj.weight.std().item()
                 b_scale = self.b_scale.mean().item()
-                if wandb.run is not None and torch.distributed.get_rank() == 0:
+                if wandb.run is not None and is_master():
                     wandb.log({
                         "diag/L0_b_rank_proj_std": br_std,
                         "diag/L0_b_proj_std": bp_std,

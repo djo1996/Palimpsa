@@ -1,86 +1,91 @@
-from datetime import datetime
 import os
+import sys
 import importlib.util
-
+from datetime import datetime
+import multiprocessing as mp
 import click
-from tqdm import tqdm
+import torch
 
 from zoology.train import train
-from zoology.config import TrainConfig
 
+def worker_fn(gpu_id, task_queue, sweep_name):
+    # 1. Isolate GPU
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    
+    # 2. Redirect stdout/stderr to a log file
+    log_dir = os.path.join(os.getcwd(), "logs", sweep_name)
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = open(os.path.join(log_dir, f"gpu_{gpu_id}.log"), "w", buffering=1)
+    
+    sys.stdout = log_file
+    sys.stderr = log_file
 
-MAX_WORKERS_PER_GPU = 1
+    print(f"[{datetime.now()}] Worker-GPU{gpu_id} started.")
 
-
-def execute_config(config: TrainConfig):
-    try: 
-        train(config=config)
-    except Exception as e:
-        return config, e
-    return config, None
-
+    while True:
+        config = task_queue.get()
+        if config is None:
+            task_queue.task_done()
+            break
+        
+        # Ensure a truly unique launch_id and run_id per worker
+        timestamp = datetime.now().strftime('%H%M%S')
+        config.launch_id = f"{sweep_name}-{timestamp}"
+        
+        print(f"\n{'='*40}\nSTARTING: {config.run_id}\n{'='*40}")
+        
+        try:
+            # We call train() which handles its own wandb init
+            train(config=config)
+            print(f"FINISHED: {config.run_id}")
+        except Exception as e:
+            print(f"FAILED: {config.run_id}\nError: {str(e)}")
+        
+        task_queue.task_done()
+    
+    log_file.close()
 
 @click.command()
 @click.argument("python_file", type=click.Path(exists=True))
-@click.option(
-    "--outdir",
-    type=click.Path(exists=True, file_okay=False, writable=True),
-    default=None,
-)
-@click.option("--name", type=str, default="default")
-@click.option("-p", "--parallelize", is_flag=True)
-@click.option("--gpus", default=None, type=str)
-def main(python_file, outdir, name: str, parallelize: bool, gpus: str):
-
-    if gpus is not None:
-        os.environ["CUDA_VISIBLE_DEVICES"] = gpus
-
-
-    # Load the given Python file as a module
+@click.option("--gpus", default="0", type=str)
+@click.option("--name", type=str, default="mqar_sweep")
+def main(python_file, gpus: str, name: str):
+    # 1. Load Configs
     spec = importlib.util.spec_from_file_location("config_module", python_file)
     config_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(config_module)
-
     configs = config_module.configs
+
+    gpu_list = [int(g) for g in gpus.split(",")]
+    num_workers = len(gpu_list)
+    task_queue = mp.JoinableQueue()
+
+    print(f"🚀 Launching sweep '{name}' on GPUs: {gpus}")
+    print(f"📝 Logs will be saved to: ./logs/{name}/")
+
     for config in configs:
-        config.launch_id = f"{name}-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        task_queue.put(config)
+    for _ in range(num_workers):
+        task_queue.put(None)
 
-    use_ray = parallelize and len(configs) > 0
-    if use_ray:
-        import ray
-        # ray was killing workers due to OOM, but it didn't seem to be necessary 
-        os.environ["RAY_memory_monitor_refresh_ms"] = "0"
-        ray.init(ignore_reinit_error=True, log_to_driver=False)
+    processes = []
+    for i in range(num_workers):
+        p = mp.Process(target=worker_fn, args=(gpu_list[i], task_queue, name))
+        p.start()
+        processes.append(p)
 
-    name = name + datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-    print(f"Running sweep {name} with {len(configs)} configs")
-
-    # Run each script in parallel using Ray
-    if not use_ray:
-        for config in configs: 
-            train(config)
-    else:
-        completed = 0
-        failed = 0
-        total = len(configs)
-        print(f"Completed: {completed} ({completed / total:0.1%}) | Total: {total}")
-
-        remote = ray.remote(num_gpus=(1 // MAX_WORKERS_PER_GPU))(execute_config)
-        futures = [remote.remote(config) for config in configs]
-        
-        while futures:
-            complete, futures = ray.wait(futures)
-            for config, error in ray.get(complete):
-                if error is not None:
-                    failed += 1
-                    config.print()
-                    print(error)
-                completed += 1
-            print(f"Completed: {completed} ({completed / total:0.1%} -- {failed} failed) | Total: {total}")
-
-        ray.shutdown()
-
-
+    # Simple terminal progress monitor
+    try:
+        task_queue.join()
+    except KeyboardInterrupt:
+        print("\nStopping sweep...")
+        for p in processes:
+            p.terminate()
+    
+    for p in processes:
+        p.join()
+    print("✅ All tasks complete.")
 
 if __name__ == "__main__":
+    mp.set_start_method('spawn', force=True)
     main()

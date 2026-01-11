@@ -139,7 +139,7 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
     supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
-        if isinstance(module, MetaMamba2):
+        if isinstance(module, MetaMamba2)and next(module.parameters()).device.type != 'meta':
             with torch.no_grad():
                 A = torch.arange(1, module.num_heads + 1)
                 module.A_log.copy_(torch.log(A))

@@ -48,7 +48,7 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
     )
 
     for d_model in [128]:
-        for lr in [0.01]:
+        for lr in  np.logspace(-4, -2, 4):
             
             # Mixer Definitions with dynamic head alignment
             MIXERS = {
@@ -95,7 +95,7 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
                     data=data,
                     learning_rate=lr,
                     max_epochs=64,
-                    run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr}",
+                    run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr:.2e}",
                     logger=LoggerConfig(
                         project_name="Palimpsa_MQAR",
                         entity=os.environ.get("WANDB_ENTITY")
