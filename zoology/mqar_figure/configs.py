@@ -27,7 +27,7 @@ VOCAB_SIZE = 8_192
 CACHE_DIR = os.path.join(os.getcwd(), "cache/mqar")
 
 configs = []
-for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
+for input_seq_len, num_kv_pairs in [(128, 64), (256, 64), (512, 64), (1024, 64)]:
     if input_seq_len == 1024:
         batch_size = 64
     else:
@@ -57,7 +57,7 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
                     kwargs={
                         "head_dim": d_model // 4, 
                         "num_heads": 4,           
-                        "expand_v": 1,            
+                        "expand_v": 2,            
                         "mode": "chunk"
                     }
                 ),
@@ -66,8 +66,18 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
                     kwargs={
                         "head_dim": d_model // 4, 
                         "num_heads": 4,           
-                        "expand_v": 1,            
+                        "expand_v": 2,            
                         "mode": "chunk"
+                    }
+                ),
+                "NotPalimpsa": dict(
+                    name="zoology.mixers.palimpsa.Palimpsa",
+                    kwargs={
+                        "head_dim": d_model // 4, 
+                        "num_heads": 4,           
+                        "expand_v": 2,            
+                        "mode": "chunk",
+                        "metaplasticity": False
                     }
                 )
             }
@@ -75,10 +85,11 @@ for input_seq_len, num_kv_pairs in [(512, 64), (1024, 128)]:
             # Block Mapping (Ensure GDN doesn't run in a Palimpsa block)
             BLOCKS = {
                 "GatedDeltaNet": "GatedDeltaNetBlock",
-                "Palimpsa": "PalimpsaBlock"
+                "Palimpsa": "PalimpsaBlock",
+                "NotPalimpsa": "PalimpsaBlock"
             }
 
-            for sequence_mixer in ["Palimpsa", "GatedDeltaNet"]:
+            for sequence_mixer in ["Palimpsa", "GatedDeltaNet", "NotPalimpsa"]:
                 
                 model = ModelConfig(
                     d_model=d_model,
