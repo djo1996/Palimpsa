@@ -140,7 +140,7 @@ class MetaMamba2(nn.Module):
         self.b_rank_proj = nn.Linear(hidden_size, self.beta_step_rank, bias=False)
         self.b_proj = nn.Linear(self.beta_step_rank, self.intermediate_size, bias=False)
         #New
-        b_scale_min, b_scale_max = 0.1, 10
+        b_scale_min, b_scale_max = 0.1, 1
         b_scale = torch.exp(torch.rand(self.num_heads) * (math.log(b_scale_max) - math.log(b_scale_min)) + math.log(b_scale_min)).clamp(min=1e-4)
         inv_b_scale = b_scale + torch.log(-torch.expm1(-b_scale))
         self.b_scale = nn.Parameter(inv_b_scale)

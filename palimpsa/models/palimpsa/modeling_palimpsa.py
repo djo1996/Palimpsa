@@ -145,14 +145,14 @@ class PalimpsaPreTrainedModel(PreTrainedModel):
                 module.dt_bias._no_weight_decay = True
                 
                 # 3. b_scale - Metaplasticity scale (Matches Palimpsa log-space init)
-                b_scale_min, b_scale_max = 0.1, 10
+                b_scale_min, b_scale_max = 0.1, 1
                 b_scale = torch.exp(
                     nn.init.uniform_(module.b_scale) * (math.log(b_scale_max) - math.log(b_scale_min)) + math.log(b_scale_min)
                 ).clamp(min=1e-4)
                 inv_b_scale = b_scale + torch.log(-torch.expm1(-b_scale))
                 module.b_scale.copy_(inv_b_scale)
                 module.b_scale._no_weight_decay = True
-                
+
                 # Beta projection initialization
                 if hasattr(module, 'b_proj'):
                     if getattr(self.config, 'finetuning', False):
