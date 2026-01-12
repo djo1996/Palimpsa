@@ -159,11 +159,20 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
                 module.dt_bias.copy_(inv_dt)
                 module.dt_bias._no_weight_decay = True
 
-                # 3. D - Skip connection
+                # 3. b_scale - Metaplasticity scale (Matches Palimpsa log-space init)
+                b_scale_min, b_scale_max = 0.1, 10
+                b_scale = torch.exp(
+                    nn.init.uniform_(module.b_scale) * (math.log(b_scale_max) - math.log(b_scale_min)) + math.log(b_scale_min)
+                ).clamp(min=1e-4)
+                inv_b_scale = b_scale + torch.log(-torch.expm1(-b_scale))
+                module.b_scale.copy_(inv_b_scale)
+                module.b_scale._no_weight_decay = True
+
+                # 4. D - Skip connection
                 nn.init.ones_(module.D)
                 module.D._no_weight_decay = True
 
-                # 4. Metaplasticity
+                # 5. Metaplasticity
                 if hasattr(module, 'b_proj'):
                     std = module.beta_step_rank**-0.5
                     if getattr(self.config, 'finetuning', False):

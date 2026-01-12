@@ -139,7 +139,13 @@ class MetaMamba2(nn.Module):
         # Metaplasticity parameters
         self.b_rank_proj = nn.Linear(hidden_size, self.beta_step_rank, bias=False)
         self.b_proj = nn.Linear(self.beta_step_rank, self.intermediate_size, bias=False)
-        self.b_scale = nn.Parameter(torch.ones(self.num_heads))
+        #New
+        b_scale_min, b_scale_max = 0.1, 10
+        b_scale = torch.exp(torch.rand(self.num_heads) * (math.log(b_scale_max) - math.log(b_scale_min)) + math.log(b_scale_min)).clamp(min=1e-4)
+        inv_b_scale = b_scale + torch.log(-torch.expm1(-b_scale))
+        self.b_scale = nn.Parameter(inv_b_scale)
+        self.b_scale._no_weight_decay = True
+
         self.Ip_log = nn.Parameter(torch.zeros(self.num_heads), requires_grad=False)
         self.Ip_log._no_weight_decay = True
 
@@ -231,11 +237,11 @@ class MetaMamba2(nn.Module):
 
         b = torch.ones(1, device=C.device) 
         if self.metaplasticity:
-            b_raw = self.b_proj(self.b_rank_proj(hidden_states))
-            b_raw = rearrange(b_raw, '... (h d) -> ... h d', d=self.head_dim)
-            b = torch.sigmoid(b_raw) * self.b_scale.view(1, 1, -1, 1)
-            b = (b * dt.unsqueeze(-1)).to(hidden_states.dtype) #Could be possible to use dt**2 depends on interpratation
-        
+            b_raw = self.b_proj(self.b_rank_proj(hidden_states)).float()
+            b_raw = rearrange(b_raw, '... (h d) -> ... h d', d=self.head_v_dim)
+            b = torch.sigmoid(b_raw) * F.softplus(self.b_scale.view(1, 1, -1, 1).float())
+            b = (b * dt.unsqueeze(-1)).to(hidden_states.dtype)
+
         # Diagnostic block
         if self.training and not hasattr(self, "_mangled") and self.layer_idx == 0:
             with torch.no_grad():
@@ -277,7 +283,7 @@ class MetaMamba2(nn.Module):
                 active_mu = recurrent_state
             
             if mode == 'chunk':
-                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=32, initial_mu_state=active_mu, initial_I_state=active_I)
+                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=16, initial_mu_state=active_mu, initial_I_state=active_I)
                 if use_cache:
                     o, final_mu, final_I = outputs
                     recurrent_state = (final_mu, final_I)
