@@ -12,7 +12,7 @@ from palimpsa.models.meta_mamba2 import MetaMamba2Config, MetaMamba2ForCausalLM
 
 AutoConfig.register("palimpsa", PalimpsaConfig)
 AutoModelForCausalLM.register(PalimpsaConfig, PalimpsaForCausalLM)
-AutoConfig.register("metamamba2", MetaMamba2Config)
+AutoConfig.register("meta_mamba2", MetaMamba2Config)
 AutoModelForCausalLM.register(MetaMamba2Config, MetaMamba2ForCausalLM)
 
 def convert_dcp_to_hf(exp_dir, step, output_dir=None):
