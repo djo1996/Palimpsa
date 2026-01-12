@@ -28,7 +28,7 @@ VOCAB_SIZE = 8_192
 CACHE_DIR = os.path.join(os.getcwd(), "cache/mqar")
 
 configs = []
-for input_seq_len, num_kv_pairs in [(128, 32), (256, 32), (512, 32), (1024, 32)]:
+for input_seq_len, num_kv_pairs in [(128, 32), (256, 64), (512, 128), (1024, 256)]:
     if input_seq_len == 1024:
         batch_size = 64
     else:

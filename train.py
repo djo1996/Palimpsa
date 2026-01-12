@@ -29,14 +29,15 @@ from flame.config_manager import JobConfig
 
 def snapshot_experiment(config):
     """
-    Creates a reproducible artifact in the experiment folder:
-    1. Saves Tokenizer
-    2. Copies the raw config.json (foolproof)
-    3. Copies the source code (Palimpsa library) to trace exact logic
+    Creates a reproducible artifact in the experiment folder.
     """
-    # Only the main process (rank 0) should do IO operations
-    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
-        return
+    # --- CRITICAL FIX: Check Environment Variables for Rank ---
+    # torch.distributed is not initialized yet, so we check OS environ.
+    # torchrun sets 'RANK' and 'LOCAL_RANK'. If not present, assume 0.
+    rank = int(os.environ.get("RANK", "0"))
+    
+    if rank != 0:
+        return  # Only the main process (Global Rank 0) snapshots
 
     dump_folder = config.job.dump_folder
     os.makedirs(dump_folder, exist_ok=True)
@@ -55,10 +56,8 @@ def snapshot_experiment(config):
         print(f"   ⚠️ Failed to save tokenizer: {e}")
 
     # ---------------------------------------------------------
-    # 2. Force Copy Config (The Foolproof Way)
+    # 2. Force Copy Config
     # ---------------------------------------------------------
-    # We don't rely on AutoConfig.save_pretrained() because it can fail with custom models.
-    # We simply copy the input JSON file to 'config.json'.
     source_config_path = config.model.config
     dest_config_path = os.path.join(dump_folder, "config.json")
     
@@ -71,10 +70,6 @@ def snapshot_experiment(config):
     # ---------------------------------------------------------
     # 3. Snapshot Source Code
     # ---------------------------------------------------------
-    # We copy the 'palimpsa' library folder into 'exp/.../src/palimpsa'
-    # This ensures you have the exact layers/kernels used for this run.
-    
-    # Assuming train.py is in Palimpsa/train.py, the lib is in Palimpsa/palimpsa
     repo_root = os.path.dirname(os.path.abspath(__file__))
     source_lib_path = os.path.join(repo_root, "palimpsa")
     dest_src_path = os.path.join(dump_folder, "src", "palimpsa")
@@ -82,9 +77,12 @@ def snapshot_experiment(config):
     if os.path.exists(source_lib_path):
         print(f"   ├── Snapshotting source code to: {dest_src_path}")
         
-        # Remove previous snapshot if it exists (e.g. restarting a run)
+        # Remove previous snapshot if it exists
         if os.path.exists(dest_src_path):
-            shutil.rmtree(dest_src_path)
+            try:
+                shutil.rmtree(dest_src_path)
+            except Exception as e:
+                print(f"   ⚠️ Warning: Could not remove old snapshot (race condition?): {e}")
 
         try:
             shutil.copytree(
