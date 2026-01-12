@@ -1,10 +1,15 @@
 #!/bin/bash
-# Usage: ./evaluation/run_eval.sh [GPU_ID] [MODEL_NAME] [STEP]
-# Example: ./evaluation/run_eval.sh 0 meta_mamba2-170M 3000
+# Usage: ./evaluation/run_eval.sh [GPU_ID] [MODEL_NAME] [STEP] [TASKS] [EXTRA_ARGS...]
+# Example: ./evaluation/run_eval.sh 0 meta_mamba2-170M 3000 "wikitext" --num_fewshot 5 --batch_size 8
 
 GPU_ID=${1:-0}
 MODEL_NAME=${2:-"palimpsa-170M"}
 STEP=${3:-3000}
+TASKS=${4:-"wikitext,hellaswag"}
+
+# Shift the arguments so we can capture the "rest" (EXTRA_ARGS)
+# We shift 4 times to skip GPU, MODEL, STEP, TASKS
+shift 4
 
 # Paths
 ROOT_DIR="$(pwd)" 
@@ -26,14 +31,16 @@ fi
 # 2. Run Evaluation
 echo "🧪 Starting Evaluation on GPU ${GPU_ID}..."
 echo "   Model: ${MODEL_NAME} (Step ${STEP})"
-echo "   Path:  ${HF_OUT_PATH}"
+echo "   Tasks: ${TASKS}"
+echo "   Extra: $@"  # Prints the extra arguments passed
 
 export CUDA_VISIBLE_DEVICES=$GPU_ID
 
+# We pass "$@" at the end to forward all remaining arguments (like --limit, --num_fewshot)
 python evaluation/launcher.py \
     --model_path "$HF_OUT_PATH" \
-    --tasks "wikitext,hellaswag" \
-    --batch_size 16 \
-    --output_path "${EXP_DIR}/eval_results_step_${STEP}.json"
+    --tasks "$TASKS" \
+    --output_path "${EXP_DIR}/eval_results_step_${STEP}.json" \
+    "$@"
 
 echo "✅ Done. Results saved to ${EXP_DIR}/eval_results_step_${STEP}.json"
