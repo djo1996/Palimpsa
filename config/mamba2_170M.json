@@ -38,6 +38,6 @@
   "use_cache": true,
   "use_conv_bias": true,
   "vocab_size": 32000,
-  "metaplasticity": true,
+  "metaplasticity": false,
   "finetuning": false
 }
