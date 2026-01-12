@@ -32,6 +32,7 @@ class MetaMamba2Config(PretrainedConfig):
         beta_step_rank: Union[str, int] = "auto",
         finetuning: bool = False,
         # Discretization
+        time_step_rank: float = 256,
         time_step_min: float = 0.001,
         time_step_max: float = 0.1,
         time_step_floor: float = 1e-4,
@@ -78,7 +79,7 @@ class MetaMamba2Config(PretrainedConfig):
         self.time_step_max = time_step_max
         self.time_step_floor = time_step_floor
         self.time_step_limit = time_step_limit
-        
+        self.time_step_rank = time_step_rank
         # Derived Mamba2 Head logic
         self.head_dim = head_dim
         self.n_groups = n_groups

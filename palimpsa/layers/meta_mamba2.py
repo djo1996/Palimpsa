@@ -52,6 +52,7 @@ class MetaMamba2(nn.Module):
         hidden_act: str = "silu",
         rms_norm: bool = True,
         chunk_size: int = 256,
+        time_step_rank: float = 256,
         time_step_limit: tuple[float, float] = (0.0, float("inf")),
         time_step_min: float = 0.001,
         time_step_max: float = 0.1,
