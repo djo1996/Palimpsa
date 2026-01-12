@@ -138,33 +138,69 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
     _no_split_modules = ["MetaMamba2Block"]
     supports_gradient_checkpointing = True
 
-    def _init_weights(self, module):
+    def _init_weights(
+    self,
+    module: nn.Module,
+    num_residuals_per_layer: int = 1, # Default as per FLA
+    ):
         if isinstance(module, MetaMamba2) and next(module.parameters()).device.type != 'meta':
             with torch.no_grad():
-                # Get device and dtype from the parameter itself
-                device = module.A_log.device
-                dtype = module.A_log.dtype
-                # 1. Initialize A_log
-                A = torch.arange(1, module.num_heads + 1, device=device, dtype=dtype)
-                # Use .data to bypass DTensor mixed-type checks
-                module.A_log.data.copy_(torch.log(A))
-                # 2. Initialize D
-                module.D.data.fill_(1.0)
-                # 3. Initialize Metaplasticity parameters
-                if hasattr(module, 'b_proj'):
-                    # Note: b_proj is a Linear layer, its weights are also DTensors
-                    std = (module.beta_step_rank ** -0.5)
-                    module.b_proj.weight.data.uniform_(-std, std)
-                    
-                    if module.finetuning:
-                        module.b_scale.data.uniform_(0.1, 1.0)
-                    else:
-                        module.b_scale.data.fill_(1.0)
+                # 1. A_log (Palimpsa-style uniform log init)
+                nn.init.uniform_(module.A_log, a=0, b=16)
+                module.A_log.log_()
+                module.A_log._no_weight_decay = True
+                
+                # 2. dt_bias (Discretization math)
+                # We create the local tensor and force it in via .data
+                dt = torch.exp(
+                    torch.rand(self.config.num_heads, device=module.dt_bias.device)
+                    * (math.log(self.config.time_step_max) - math.log(self.config.time_step_min))
+                    + math.log(self.config.time_step_min),
+                ).clamp(min=1e-4)
+                inv_dt = dt + torch.log(-torch.expm1(-dt))
+                module.dt_bias.data.copy_(inv_dt)
+                module.dt_bias._no_weight_decay = True
 
+                # 3. D (Skip connection)
+                module.D.data.fill_(1.0)
+                module.D._no_weight_decay = True
+
+                # 4. Metaplasticity
+                if hasattr(module, 'b_proj'):
+                    std = module.beta_step_rank**-0.5
+                    if getattr(self.config, 'finetuning', False):
+                        nn.init.uniform_(module.b_scale.data, 0.1, 1.0)
+                        nn.init.uniform_(module.b_proj.weight.data, -std, std)
+                    else:
+                        nn.init.ones_(module.b_scale.data)
+                        nn.init.uniform_(module.b_proj.weight.data, -std, std)
+
+        # Standard Layer Initialization
         elif isinstance(module, (nn.Linear, nn.Conv1d)):
-            nn.init.normal_(module.weight, std=self.config.initializer_range)
+            nn.init.normal_(module.weight.data, mean=0.0, std=self.config.initializer_range)
             if module.bias is not None:
-                nn.init.zeros_(module.bias)
+                nn.init.zeros_(module.bias.data)
+                
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight.data, mean=0.0, std=self.config.initializer_range)
+            
+        elif hasattr(module, 'reset_parameters'):
+            module.reset_parameters()
+
+        # 5. GPT-2 / Megatron-LM Residual Scaling
+        if getattr(self.config, 'rescale_prenorm_residual', False):
+            p = None
+            if hasattr(module, 'out_proj'):
+                p = module.out_proj.weight
+            elif hasattr(module, 'down_proj'):
+                p = module.down_proj.weight
+                
+            if p is not None:
+                # Re-init then scale by 1/sqrt(N_layers)
+                nn.init.kaiming_uniform_(p.data, a=math.sqrt(5))
+                with torch.no_grad():
+                    # N is total layers, use p.data to keep FSDP happy
+                    p.data /= math.sqrt(num_residuals_per_layer * self.config.num_hidden_layers)
 
 class MetaMamba2Model(MetaMamba2PreTrainedModel):
     def __init__(self, config):
