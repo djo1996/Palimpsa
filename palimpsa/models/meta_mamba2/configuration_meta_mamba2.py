@@ -32,7 +32,6 @@ class MetaMamba2Config(PretrainedConfig):
         beta_step_rank: Union[str, int] = "auto",
         finetuning: bool = False,
         # Discretization
-        time_step_rank: Union[str, int] = "auto",
         time_step_min: float = 0.001,
         time_step_max: float = 0.1,
         time_step_floor: float = 1e-4,
@@ -74,12 +73,6 @@ class MetaMamba2Config(PretrainedConfig):
             self.beta_step_rank = math.ceil(self.hidden_size / 16)
         else:
             self.beta_step_rank = beta_step_rank
-
-        # Discretization mapping
-        if time_step_rank == "auto":
-            self.time_step_rank = math.ceil(self.hidden_size / 16)
-        else:
-            self.time_step_rank = time_step_rank
         
         self.time_step_min = time_step_min
         self.time_step_max = time_step_max
