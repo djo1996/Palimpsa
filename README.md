@@ -23,6 +23,11 @@ Palimpsa_Lab/
 │   ├── palimpsa/           # Core library (layers, models)
 │   │   └── integration.py  # Flame/Torch-Titan plugin registry
 │   ├── config/             # Model architecture JSONs
+│   ├── evaluation/         # Evaluation Harness (NEW)
+│   │   ├── launcher.py     # Python entry point for lm-eval
+│   │   └── run_eval.sh     # Bash dispatcher for experiments
+│   ├── tools/              # Utilities (NEW)
+│   │   └── convert_dcp_to_hf.py # Checkpoint converter
 │   ├── zoology/            # MQAR/Associative recall benchmarks
 │   └── train.py            # Unified training entry point
 ├── flame/                  # Training engine (submodule/clone)
@@ -150,6 +155,50 @@ torchrun --nproc_per_node=4 \
     --training.num_workers 8 \
     --checkpoint.interval 200 \
     --metrics.log_freq 10
+```
+## ⚖️ Model Evaluation
+
+We provide a robust pipeline to convert distributed checkpoints and run standard benchmarks using `lm-evaluation-harness`.
+
+### 1. Convert Checkpoint
+Training produces Distributed Checkpoints (DCP). Before evaluating, convert them to Hugging Face format. This command automatically finds the config and tokenizer snapped during training.
+
+```bash
+# Example: Convert step 3000 of the 'palimpsa-170M' experiment
+python tools/convert_dcp_to_hf.py --exp ../exp/palimpsa-170M --step 3000
+```
+*Outputs to: `../exp/palimpsa-170M/hf_model_step_3000/`*
+
+### 2. Run Benchmarks
+Use the dispatcher script to launch evaluation on a specific GPU. This handles path setup and logging automatically.
+
+**Usage:**
+```bash
+bash evaluation/run_eval.sh [GPU_ID] [MODEL_NAME] [STEP] [TASKS] [EXTRA_ARGS]
+```
+
+**Examples:**
+
+Run standard benchmarks on GPU 0:
+```bash
+bash evaluation/run_eval.sh 0 palimpsa-170M 3000 "wikitext,hellaswag,piqa"
+```
+
+Run advanced configuration (few-shot, limit samples) on GPU 3:
+```bash
+bash evaluation/run_eval.sh 3 palimpsa-170M 3000 "lambada_openai" --num_fewshot 5 --batch_size 8 --limit 100
+```
+
+**Parallel Evaluation on Multiple GPUs:**
+You can launch multiple evaluations simultaneously by specifying different GPU IDs:
+```bash
+# Run wikitext on GPU 0
+bash evaluation/run_eval.sh 0 palimpsa-170M 3000 "wikitext" &
+
+# Run hellaswag on GPU 1
+bash evaluation/run_eval.sh 1 palimpsa-170M 3000 "hellaswag" &
+
+wait
 ```
 ---
 
