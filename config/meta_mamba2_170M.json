@@ -28,7 +28,7 @@
   "rescale_prenorm_residual": true,
   "residual_in_fp32": true,
   "rms_norm": true,
-  "state_size": 64,
+  "state_size": 16,
   "tie_word_embeddings": true,
   "time_step_floor": 0.0001,
   "time_step_max": 0.1,
