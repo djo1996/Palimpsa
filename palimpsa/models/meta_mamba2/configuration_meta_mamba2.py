@@ -6,7 +6,7 @@ from typing import Optional, Union, Tuple
 from transformers.configuration_utils import PretrainedConfig
 
 class MetaMamba2Config(PretrainedConfig):
-    model_type = "metamamba2"
+    model_type = "meta_mamba2"
 
     def __init__(
         self,
@@ -111,7 +111,7 @@ class MetaMamba2Config(PretrainedConfig):
                 "at the potential cost of reduced precision. "
                 "If you observe issues like loss divergence, consider disabling this setting.",
             )
-            
+
         super().__init__(
             bos_token_id=bos_token_id,
             eos_token_id=eos_token_id,
