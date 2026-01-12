@@ -153,16 +153,14 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
                 # 2. dt_bias (Discretization math)
                 # We create the local tensor and force it in via .data
                 dt = torch.exp(
-                    torch.rand(self.config.num_heads, device=module.dt_bias.device)
-                    * (math.log(self.config.time_step_max) - math.log(self.config.time_step_min))
-                    + math.log(self.config.time_step_min),
+                    nn.init.uniform_(module.dt_bias) * (math.log(self.config.time_step_max) - math.log(self.config.time_step_min)) + math.log(self.config.time_step_min),
                 ).clamp(min=1e-4)
                 inv_dt = dt + torch.log(-torch.expm1(-dt))
-                module.dt_bias.data.copy_(inv_dt)
+                module.dt_bias.copy_(inv_dt)
                 module.dt_bias._no_weight_decay = True
 
-                # 3. D (Skip connection)
-                module.D.data.fill_(1.0)
+                # 3. D - Skip connection
+                nn.init.ones_(module.D)
                 module.D._no_weight_decay = True
 
                 # 4. Metaplasticity
