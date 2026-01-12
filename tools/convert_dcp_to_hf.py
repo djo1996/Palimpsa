@@ -36,7 +36,7 @@ def convert_dcp_to_hf(exp_dir, step, output_dir=None):
     # 1. Load Artifacts from Experiment Root
     print("   ├── Loading Config & Tokenizer from experiment root...")
     try:
-        config = AutoConfig.from_pretrained(exp_dir, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(exp_dir, trust_remote_code=False)
         tokenizer = AutoTokenizer.from_pretrained(exp_dir, trust_remote_code=True)
     except OSError:
         print("   ❌ Error: config.json or tokenizer not found in experiment dir.")
