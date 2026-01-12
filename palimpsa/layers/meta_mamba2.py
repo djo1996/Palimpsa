@@ -277,7 +277,7 @@ class MetaMamba2(nn.Module):
                 active_mu = recurrent_state
             
             if mode == 'chunk':
-                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=16, initial_mu_state=active_mu, initial_I_state=active_I)
+                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=32, initial_mu_state=active_mu, initial_I_state=active_I)
                 if use_cache:
                     o, final_mu, final_I = outputs
                     recurrent_state = (final_mu, final_I)
