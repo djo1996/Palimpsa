@@ -238,7 +238,7 @@ class MetaMamba2(nn.Module):
         b = torch.ones(1, device=C.device) 
         if self.metaplasticity:
             b_raw = self.b_proj(self.b_rank_proj(hidden_states)).float()
-            b_raw = rearrange(b_raw, '... (h d) -> ... h d', d=self.head_v_dim)
+            b_raw = rearrange(b_raw, '... (h d) -> ... h d', d=self.head_dim)
             b = torch.sigmoid(b_raw) * F.softplus(self.b_scale.view(1, 1, -1, 1).float())
             b = (b * dt.unsqueeze(-1)).to(hidden_states.dtype)
 
