@@ -139,18 +139,28 @@ class MetaMamba2PreTrainedModel(PreTrainedModel):
     supports_gradient_checkpointing = True
 
     def _init_weights(self, module):
-        if isinstance(module, MetaMamba2)and next(module.parameters()).device.type != 'meta':
+        if isinstance(module, MetaMamba2) and next(module.parameters()).device.type != 'meta':
             with torch.no_grad():
-                A = torch.arange(1, module.num_heads + 1)
-                module.A_log.copy_(torch.log(A))
-                nn.init.ones_(module.D)
+                # Get device and dtype from the parameter itself
+                device = module.A_log.device
+                dtype = module.A_log.dtype
+                # 1. Initialize A_log
+                A = torch.arange(1, module.num_heads + 1, device=device, dtype=dtype)
+                # Use .data to bypass DTensor mixed-type checks
+                module.A_log.data.copy_(torch.log(A))
+                # 2. Initialize D
+                module.D.data.fill_(1.0)
+                # 3. Initialize Metaplasticity parameters
                 if hasattr(module, 'b_proj'):
-                    std = module.beta_step_rank**-0.5
-                    nn.init.uniform_(module.b_proj.weight, -std, std)
+                    # Note: b_proj is a Linear layer, its weights are also DTensors
+                    std = (module.beta_step_rank ** -0.5)
+                    module.b_proj.weight.data.uniform_(-std, std)
+                    
                     if module.finetuning:
-                        nn.init.uniform_(module.b_scale, 0.1, 1.0)
+                        module.b_scale.data.uniform_(0.1, 1.0)
                     else:
-                        nn.init.ones_(module.b_scale)
+                        module.b_scale.data.fill_(1.0)
+
         elif isinstance(module, (nn.Linear, nn.Conv1d)):
             nn.init.normal_(module.weight, std=self.config.initializer_range)
             if module.bias is not None:
