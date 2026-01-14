@@ -96,6 +96,15 @@ python3 -m zoology.launch zoology/mqar_figure/configs.py --gpus 0,1,2,3 --name p
 
 ---
 
+## Meta HMM
+#In the Palimpsa directory, run
+pip install palimpsa[metahmm]
+python train_nano_hmm.py --model palimpsa --batch_size 128
+
+---
+
+---
+
 ## 🔬 Advanced: Research Scale (Flame)
 
 To train Large Language Models (LLMs) using the [Flame](https://github.com/fla-org/flame) engine:

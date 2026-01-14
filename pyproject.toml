@@ -20,7 +20,15 @@ dependencies = [
     "tyro",
     "lm_eval",
     "matplotlib",
-    "numpy"
+    "numpy",
+]
+
+[project.optional-dependencies]
+metahmm = [
+    "jax[cuda12]",
+    "jaxlib>=0.6.2",
+    "dynamax>=1.0.1",
+    "omegaconf>=2.3.0",
 ]
 
 [tool.setuptools.packages.find]
