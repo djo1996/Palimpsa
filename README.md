@@ -184,9 +184,10 @@ Run standard benchmarks on GPU 0:
 bash evaluation/run_eval.sh 0 palimpsa-170M 3000 "wikitext,hellaswag,piqa"
 ```
 
-Run advanced configuration (few-shot, limit samples) on GPU 3:
+Run advanced configuration (few-shot, limit samples, metadata) on GPU 3:
 ```bash
 bash evaluation/run_eval.sh 3 palimpsa-170M 3000 "lambada_openai" --num_fewshot 5 --batch_size 8 --limit 100
+bash evaluation/run_eval.sh 3 palimpsa-170M 3000 "niah_single_1" --metadata '{"max_seq_lengths":[1024,2048,4096,8192]}' &
 ```
 
 **Parallel Evaluation on Multiple GPUs:**
