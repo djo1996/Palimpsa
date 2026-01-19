@@ -38,7 +38,6 @@ class MetaMamba2(nn.Module):
     Adds Bayesian Metaplasticity terms (Ip, Beta) to the standard Mamba2 architecture.
     Uses Triton-only backend.
     """
-
     def __init__(
         self,
         num_heads: int,
@@ -63,6 +62,8 @@ class MetaMamba2(nn.Module):
         finetuning: bool = False,
         beta_step_rank: int=128,
         mode: str = 'chunk',
+        init_diagnosis: bool = True,
+        eval_diagnosis: bool = False,
     ) -> MetaMamba2:
         super().__init__()
 
@@ -70,6 +71,8 @@ class MetaMamba2(nn.Module):
         self.finetuning = finetuning
         self.beta_step_rank = beta_step_rank
         self.mode = mode
+        self.init_diagnosis = init_diagnosis
+        self.eval_diagnosis = eval_diagnosis
 
         if not self.metaplasticity:
              warnings.warn("⚠️ MetaMamba2 running in Mamba2 mode (Metaplasticity=False).")
@@ -157,7 +160,63 @@ class MetaMamba2(nn.Module):
         )
 
 
+    def _diag_init(self, b, b_scale, dt, A):
+        """Logs initialization statistics to WandB."""
+        if not (wandb.run is not None and is_master()):
+            return
 
+        with torch.no_grad():
+            br_std = self.b_rank_proj.weight.std().item()
+            bp_std = self.b_proj.weight.std().item()
+            b_scale_val = b_scale.mean().item()
+          
+            # Compute N = 1 / (1 - exp(-A*dt))
+            decay = torch.exp(-A * dt)
+            n_val = 1.0 / (1.0 - decay + 1e-6) 
+            n_avg = n_val.mean(dim=(0, 1))
+
+            metrics = {
+                f"diag_init/L{self.layer_idx}_b_rank_proj_std": br_std,
+                f"diag_init/L{self.layer_idx}_b_proj_std": bp_std,
+                f"diag_init/L{self.layer_idx}_b_scale": b_scale_val,
+            }
+            if b is not None:
+             metrics[f"diag_init/L{self.layer_idx}_b_output_std"] = b.std().item()
+            # Log N_avg per head
+            for h in range(len(n_avg)):
+                metrics[f"diag_init/L{self.layer_idx}_N_avg/H{h}"] = n_avg[h].item()
+
+            wandb.log(metrics, commit=False)
+
+    def _diag_eval(self, final_I, b, dt, A):
+        """Logs evaluation statistics for the final State I and b per head."""
+        if final_I is None or not (wandb.run is not None and is_master()):
+            return
+        with torch.no_grad():
+            metrics = {}
+            H = final_I.shape[1]
+            current_b_scales = F.softplus(self.b_scale).detach()
+            
+            # Compute N = 1 / (1 - exp(-A*dt))
+            decay = torch.exp(-A * dt)
+            n_val = 1.0 / (1.0 - decay + 1e-6) 
+            n_avg = n_val.mean(dim=(0, 1))
+
+            for h in range(H):
+                # --- Scalar Metrics ---
+                state_h = final_I[:, h, ...] 
+                metrics[f"diag_eval/L{self.layer_idx}_I_Range/H{h}"] = (state_h.max() - state_h.min()).item()
+                metrics[f"diag_eval/L{self.layer_idx}_I_Mean/H{h}"] = state_h.mean().item()
+                metrics[f"diag_eval/L{self.layer_idx}_I_Std/H{h}"] = state_h.std().item()
+                
+                if b is not None:
+                    metrics[f"diag_eval/L{self.layer_idx}_b_std/H{h}"] = b[:, :, h, :].std().item()
+
+                metrics[f"diag_eval/L{self.layer_idx}_b_scale/H{h}"] = current_b_scales[h].item()
+                metrics[f"diag_eval/L{self.layer_idx}_N_avg/H{h}"] = n_avg[h].item()
+                metrics[f"diag_eval/L{self.layer_idx}_A/H{h}"] = A[h].item()
+                metrics[f"diag_eval/L{self.layer_idx}_dt_avg/H{h}"] = dt[:, :, h].mean().item()
+            wandb.log(metrics, commit=False)
 
     def forward(
         self,
@@ -181,8 +240,6 @@ class MetaMamba2(nn.Module):
         cu_seqlens = kwargs.get('cu_seqlens')
         
         if attention_mask is not None:
-            # We only pass cu_seqlens to ShortConvolution, NOT mask. 
-            # Doing both causes the ValueError you encountered.
             indices, cu_seqlens, _ = get_unpad_data(attention_mask[:, -q_len:])
             hidden_states = index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices).unsqueeze(0)
             
@@ -233,32 +290,21 @@ class MetaMamba2(nn.Module):
 
 
         dx = (x * dt.unsqueeze(-1)).to(x.dtype)
-
-        b = torch.ones(1, device=C.device) 
         if self.metaplasticity:
             b_raw = self.b_proj(self.b_rank_proj(hidden_states)).float()
             b_raw = rearrange(b_raw, '... (h d) -> ... h d', d=self.head_dim)
             b = torch.sigmoid(b_raw) * F.softplus(self.b_scale.view(1, 1, -1, 1).float())
             b = (b * dt.unsqueeze(-1)).to(hidden_states.dtype)
-
-        # Diagnostic block
-        if self.training and not hasattr(self, "_mangled") and self.layer_idx == 0:
-            with torch.no_grad():
-                #Some other stuff could be plot to see if everything is how it is supposed to be. 
-                br_std = self.b_rank_proj.weight.std().item()
-                bp_std = self.b_proj.weight.std().item()
-                b_scale = self.b_scale.mean().item()
-                if wandb.run is not None and is_master():
-                    wandb.log({
-                        "diag/L0_b_rank_proj_std": br_std,
-                        "diag/L0_b_proj_std": bp_std,
-                        "diag/L0_b_output_std": b.std().item(),
-                        "diag/L0_b_scale": b_scale,
-                    }, commit=False)
-                self._mangled = True
-
-        Ip = torch.exp(self.Ip_log.float())
+        else: 
+            b = None
         
+        Ip = torch.exp(self.Ip_log.float())
+
+        # [Diagnostic Init Block]
+        if self.init_diagnosis and self.training and not hasattr(self, "_mangled") and self.layer_idx == 0:
+            self._diag_init(b, self.b_scale, dt, A)
+            self._mangled = True
+
         recurrent_state = None
         if last_state is not None:
             recurrent_state = last_state.get('recurrent_state') if isinstance(last_state, dict) else last_state[0]
@@ -319,6 +365,11 @@ class MetaMamba2(nn.Module):
         if attention_mask is not None:
             o = pad_input(o.squeeze(0), indices, batch_size, q_len)
         
+        # [Diagnostic Eval Block]
+        if self.eval_diagnosis and not self.training and self.metaplasticity:
+             self._diag_eval(final_I, b, dt, A)
+
+
         return o, None, past_key_values
 
 

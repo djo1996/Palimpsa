@@ -4,6 +4,7 @@ from typing import Dict, Optional, Union
 
 from transformers.configuration_utils import PretrainedConfig
 import math
+import warnings
 
 class PalimpsaConfig(PretrainedConfig):
     model_type = 'palimpsa'
@@ -12,16 +13,16 @@ class PalimpsaConfig(PretrainedConfig):
         self,
         hidden_size: int = 2048,
         expand_v: float = 2.0,
-        reduct_k: float = 1, 
+        expand_k: float = 1, 
         use_gate: bool = True,
-        beta_step_rank: Union[str, int] = "auto", # [FIX] Added Union to stop type checkers from screaming
+        beta_step_rank: Union[str, int] = "auto",
         use_short_conv: bool = True,
         allow_neg_eigval: bool = False,
         conv_size: int = 4,
         head_dim: int = 256,
         num_heads: int = 6,
         num_v_heads: Optional[int] = None,
-        mode: str = "chunk", # [FIX] Explicitly defined mode. Default to 'chunk' for training stability.
+        attn_mode: str = "chunk", 
         max_position_embeddings: int = 2048,
         hidden_ratio: Optional[int] = 4,
         intermediate_size: Optional[int] = None,
@@ -41,16 +42,16 @@ class PalimpsaConfig(PretrainedConfig):
         fuse_linear_cross_entropy: bool = False,
         use_l2warp: bool = False,
         vocab_size: int = 32000,
-        qk_act: str = "softmax",
+        use_residual: bool = True,
         metaplasticity: bool = True,
         finetuning: bool = False,
-        gumbel_temp: float=0.5,
-        k_temp: float=1,
+        init_diagnosis: bool = True, 
+        eval_diagnosis: bool = False,
         **kwargs
     ):
         self.hidden_size = hidden_size
         self.expand_v = expand_v
-        self.reduct_k = reduct_k
+        self.expand_k = expand_k
         self.use_gate = use_gate
         self.use_short_conv = use_short_conv
         self.conv_size = conv_size
@@ -58,11 +59,10 @@ class PalimpsaConfig(PretrainedConfig):
         self.num_heads = num_heads
         self.num_v_heads = num_v_heads
         self.mode = mode
-        self.qk_act = qk_act
         self.metaplasticity = metaplasticity
         self.finetuning = finetuning 
-        self.gumbel_temp = gumbel_temp
-        self.k_temp = k_temp
+        self.use_residual = use_residual 
+        
 
         self.beta_step_rank = math.ceil(self.hidden_size / 16) if beta_step_rank == "auto" else beta_step_rank
         self.max_position_embeddings = max_position_embeddings

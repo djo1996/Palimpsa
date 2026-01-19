@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
+
 from __future__ import annotations
+from torch import Tensor
 
 import math
 import warnings
 from typing import TYPE_CHECKING, Dict, Optional, Tuple
-from torch import Tensor
 
 import torch
 import torch.nn as nn
@@ -12,16 +14,15 @@ from torch.nn import functional as F
 
 from fla.layers.utils import get_unpad_data, index_first_axis, pad_input
 from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
-from fla.ops.gated_delta_rule import chunk_gated_delta_rule, fused_recurrent_gated_delta_rule
+import torch.nn.functional as F 
 
 if TYPE_CHECKING:
     from transformers.processing_utils import Unpack
-
     from fla.models.utils import Cache
 
-from fla.layers import GatedDeltaNet
+from palimpsa.layers.meta_mamba2 import MetaMamba2
 
-class GatedDeltaNetBlock(nn.Module):
+class MetaMamba2Block(nn.Module):
     def __init__(
         self, config, fused_add_norm=True, residual_in_fp32=True, norm_epsilon=1e-5, **factory_kwargs
     ):
@@ -41,8 +42,8 @@ class GatedDeltaNetBlock(nn.Module):
         d_model = config.d_model
         self.residual_in_fp32 = residual_in_fp32
         self.fused_add_norm = fused_add_norm
-        #self.mixer = config.sequence_mixer.instantiate(d_model=d_model, **factory_kwargs)
-        self.mixer = GatedDeltaNet(d_model, **factory_kwargs, **config.sequence_mixer.kwargs)
+        # num_heads will be picked up correctly from config.sequence_mixer.kwargs
+        self.mixer = MetaMamba2(hidden_size=d_model, **factory_kwargs, **config.sequence_mixer.kwargs)
         self.norm = RMSNorm(d_model, eps=norm_epsilon)
         
     def forward(
@@ -59,4 +60,5 @@ class GatedDeltaNetBlock(nn.Module):
         if self.residual_in_fp32:
             residual = residual.to(torch.float32)
         hidden_states, _, _ = self.mixer(hidden_states, inference_params=inference_params)
-        return hidden_states, residual 
+        return hidden_states, residual  
+

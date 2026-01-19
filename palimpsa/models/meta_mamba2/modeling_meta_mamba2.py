@@ -1,14 +1,18 @@
 # -*- coding: utf-8 -*-
 # Copyright 2024 state-spaces/mamba2 org, HuggingFace Inc. team, and Djohan Bonnet.
 
+
+from __future__ import annotations
+
 import math
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+import warnings
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 import torch
-from torch import nn
+import torch.nn as nn
+from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
 from transformers.modeling_utils import PreTrainedModel
-from transformers.utils import ModelOutput, logging
+from transformers.utils import logging
 from transformers.utils.deprecation import deprecate_kwarg
 
 from palimpsa.models.meta_mamba2.configuration_meta_mamba2 import MetaMamba2Config
@@ -17,81 +21,20 @@ from fla.models.utils import Cache, FLAGenerationMixin
 from fla.modules import FusedCrossEntropyLoss, FusedLinearCrossEntropyLoss, RMSNorm
 from fla.modules.l2warp import l2_warp
 
+if TYPE_CHECKING:
+    from transformers.processing_utils import Unpack
+
+try:
+    from transformers.modeling_layers import GradientCheckpointingLayer
+except ImportError:
+    from fla.models.modeling_layers import GradientCheckpointingLayer
+
 logger = logging.get_logger(__name__)
 
-class MetaMamba2Cache(Cache):
-    def __init__(
-        self,
-        config: MetaMamba2Config,
-        batch_size: int,
-        dtype: torch.dtype = torch.float16,
-        device: str | None = None,
-    ):
-        self.dtype = dtype
-        self.conv_kernel_size = config.conv_kernel
-        self.intermediate_size = int(config.expand * config.hidden_size)
-        self.num_heads = config.num_heads
-        self.head_dim = config.head_dim
-        self.state_size = config.state_size
 
-        self.conv_states = torch.zeros(
-            config.num_hidden_layers,
-            batch_size,
-            self.intermediate_size + 2 * config.n_groups * self.state_size,
-            self.conv_kernel_size,
-            device=device,
-            dtype=dtype,
-        )
-        self.mu_states = torch.zeros(
-            config.num_hidden_layers,
-            batch_size,
-            self.num_heads,
-            self.head_dim,
-            self.state_size,
-            device=device,
-            dtype=dtype,
-        )
-        self.I_states = torch.zeros(
-            config.num_hidden_layers,
-            batch_size,
-            self.num_heads,
-            self.state_size,
-            self.state_size,
-            device=device,
-            dtype=dtype,
-        )
 
-    def update_conv_state(self, layer_idx: int, new_conv_state: torch.Tensor, cache_init: bool = False):
-        if cache_init:
-            self.conv_states[layer_idx] = new_conv_state.to(self.conv_states.device)
-        else:
-            self.conv_states[layer_idx] = self.conv_states[layer_idx].roll(shifts=-1, dims=-1)
-            self.conv_states[layer_idx][:, :, -1] = new_conv_state[:, 0, :].to(self.conv_states.device)
-        return self.conv_states[layer_idx]
-
-    def update_recurrent_state(self, layer_idx: int, new_state: Tuple[torch.Tensor, torch.Tensor] | torch.Tensor):
-        if isinstance(new_state, (list, tuple)):
-            self.mu_states[layer_idx] = new_state[0].to(self.mu_states.device)
-            self.I_states[layer_idx] = new_state[1].to(self.I_states.device)
-        else:
-            self.mu_states[layer_idx] = new_state.to(self.mu_states.device)
-        return (self.mu_states[layer_idx], self.I_states[layer_idx])
-
-@dataclass
-class MetaMamba2Output(ModelOutput):
-    last_hidden_state: torch.FloatTensor | None = None
-    cache_params: MetaMamba2Cache | None = None
-    hidden_states: tuple[torch.FloatTensor] | None = None
-
-@dataclass
-class MetaMamba2CausalLMOutput(ModelOutput):
-    loss: torch.FloatTensor | None = None
-    logits: torch.FloatTensor | None = None
-    cache_params: MetaMamba2Cache | None = None
-    hidden_states: tuple[torch.FloatTensor] | None = None
-
-class MetaMamba2Block(nn.Module):
-    def __init__(self, config, layer_idx):
+class MetaMamba2Block(GradientCheckpointingLayer):
+    def __init__(self, config: MetaMamba2Config, layer_idx: int):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
@@ -119,24 +62,44 @@ class MetaMamba2Block(nn.Module):
             finetuning=config.finetuning,
             beta_step_rank=config.beta_step_rank,
             mode=config.mode,
+            init_diagnosis=getattr(config, "init_diagnosis", False),
+            eval_diagnosis=getattr(config, "eval_diagnosis", False),
         )
+        self.residual_in_fp32 = getattr(config, 'residual_in_fp32', False)
 
-    def forward(self, hidden_states, cache_params=None, attention_mask=None, **kwargs):
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
+        use_cache: bool | None = False,
+        output_attentions: bool | None = False,
+        **kwargs: Unpack[dict]
+    ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        
         residual = hidden_states
         hidden_states = self.norm(hidden_states)
-        hidden_states, _, cache_params = self.mixer(
-            hidden_states,
-            past_key_values=cache_params,
+        hidden_states, attentions, past_key_values = self.mixer(
+            hidden_states=hidden_states,
             attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
             **kwargs
         )
-        return residual + hidden_states
+        hidden_states = residual + hidden_states
+        if self.residual_in_fp32:
+            hidden_states = hidden_states.to(dtype=self.norm.weight.dtype)
+        outputs = (hidden_states, attentions, past_key_values)
+
+        return outputs
 
 class MetaMamba2PreTrainedModel(PreTrainedModel):
     config_class = MetaMamba2Config
-    base_model_prefix = "backbone"
+    base_model_prefix = "model"
     _no_split_modules = ["MetaMamba2Block"]
     supports_gradient_checkpointing = True
+    _supports_cache_class = True
 
     def _init_weights(
     self,
@@ -217,70 +180,171 @@ class MetaMamba2Model(MetaMamba2PreTrainedModel):
         self.norm_f = RMSNorm(config.hidden_size, eps=config.norm_eps)
         self.post_init()
 
-    def forward(self, input_ids=None, inputs_embeds=None, cache_params=None, use_cache=None, output_hidden_states=None, return_dict=None, attention_mask=None, **kwargs):
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+    def get_input_embeddings(self):
+        return self.embeddings
+
+    def set_input_embeddings(self, value):
+        self.embeddings = value
+
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        past_key_values: Optional[Union[Cache, List[torch.FloatTensor]]] = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        **kwargs: Unpack[dict],
+    ) -> Union[Tuple, BaseModelOutputWithPast]:
+        if output_attentions:
+            warnings.warn("`MetaMamba2Model` does not `output_attentions` now, setting it to `False`.")
+            output_attentions = False
         
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        use_cache = use_cache if use_cache is not None else (self.config.use_cache if not self.training else False)
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        if input_ids is None and inputs_embeds is None:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
         if inputs_embeds is None:
             inputs_embeds = self.embeddings(input_ids)
         hidden_states = inputs_embeds
         
-        if use_cache and cache_params is None:
-            cache_params = MetaMamba2Cache(self.config, inputs_embeds.size(0), device=hidden_states.device, dtype=hidden_states.dtype)
+        if use_cache and not isinstance(past_key_values, Cache):
+            past_key_values = Cache.from_legacy_cache(past_key_values)
+
 
         all_hidden_states = () if output_hidden_states else None
+        all_attns = () if output_attentions else None
         for layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
-            hidden_states = layer(hidden_states, cache_params=cache_params, attention_mask=attention_mask, use_cache=use_cache, **kwargs)
+            hidden_states, attentions, past_key_values = layer(
+                hidden_states,
+                attention_mask=attention_mask,
+                past_key_values=past_key_values,
+                use_cache=use_cache,
+                output_attentions=output_attentions,
+                **kwargs,
+            )
+            if output_attentions:
+                all_attns += (attentions,)
         
         hidden_states = self.norm_f(hidden_states)
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, cache_params, all_hidden_states] if v is not None)
+            return tuple(i for i in [hidden_states, past_key_values, all_hidden_states, all_attns] if i is not None)
 
-        return MetaMamba2Output(last_hidden_state=hidden_states, cache_params=cache_params, hidden_states=all_hidden_states)
+        return BaseModelOutputWithPast(last_hidden_state=hidden_states, past_key_values=past_key_values, hidden_states=all_hidden_states, attentions=all_attns,)
 
 class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
+    _tied_weights_keys = ["lm_head.weight"]
     def __init__(self, config):
         super().__init__(config)
-        self.backbone = MetaMamba2Model(config)
+        self.model = MetaMamba2Model(config)
+        self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.criterion = None
         self.post_init()
 
-    def forward(self, input_ids=None, inputs_embeds=None, labels=None, cache_params=None, output_hidden_states=None, return_dict=None, use_cache=None, attention_mask=None, **kwargs):
+    def get_input_embeddings(self):
+        return self.model.embeddings
+
+    def set_input_embeddings(self, value):
+        self.model.embeddings = value
+
+    def get_output_embeddings(self):
+        return self.lm_head
+
+    def set_output_embeddings(self, new_embeddings):
+        self.lm_head = new_embeddings
+
+    def set_decoder(self, decoder):
+        self.model = decoder
+
+    def get_decoder(self):
+        return self.model
+
+    def generate(self, *args, **kwargs):
+        try:
+            return super().generate(*args, **kwargs)
+        except AttributeError as exception:
+            if 'past_key_values' in str(exception):
+                raise AttributeError(
+                    f"You tried to call `generate` with a decoding strategy that manipulates `past_key_values`, "
+                    f"which is not supported for {self.__class__.__name__}. "
+                    f"Try another generation strategy instead."
+                )
+            else:
+                raise exception
+
+    @deprecate_kwarg("num_logits_to_keep", version="4.50", new_name="logits_to_keep")
+    def forward(
+        self,
+        input_ids: torch.LongTensor = None,
+        attention_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
+        past_key_values: Cache | list[torch.FloatTensor] | None = None,
+        labels: torch.LongTensor | None = None,
+        use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
+        logits_to_keep: int | None = 0,
+        **kwargs: Unpack[dict],
+    ) -> Union[Tuple, CausalLMOutputWithPast]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
-        outputs = self.backbone(
-            input_ids=input_ids, 
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
-            cache_params=cache_params,
+            past_key_values=past_key_values,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            use_cache=use_cache,
-            attention_mask=attention_mask,
-            **kwargs
+            **kwargs,
         )
-        hidden_states = outputs[0] if not return_dict else outputs.last_hidden_state
-        logits = self.lm_head(hidden_states)
-        
-        loss = None
+        hidden_states = outputs[0]
+
+        loss, logits = None, None
+        if not self.config.fuse_linear_cross_entropy or labels is None:
+            logits = self.lm_head(hidden_states if logits_to_keep is None else hidden_states[:, -logits_to_keep:])
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            loss = loss_fct(shift_logits.view(-1, self.config.vocab_size), shift_labels.view(-1))
+            if getattr(self, 'criterion', None) is None:
+                if self.config.fuse_linear_cross_entropy:
+                    criterion = FusedLinearCrossEntropyLoss(use_l2warp=self.config.use_l2warp)
+                elif self.config.fuse_cross_entropy:
+                    criterion = FusedCrossEntropyLoss(inplace_backward=True)
+                else:
+                    criterion = nn.CrossEntropyLoss()
+            else:
+                criterion = self.criterion
+            labels = labels.to(hidden_states.device)
+            labels = torch.cat((labels[..., 1:], torch.full_like(labels[:, :1], criterion.ignore_index)), 1)
+            if self.config.fuse_linear_cross_entropy:
+                loss = criterion(hidden_states, labels, self.lm_head.weight, self.lm_head.bias)
+            else:
+                loss = criterion(logits.view(labels.numel(), -1), labels.view(-1))
+                loss = l2_warp(loss, logits) if self.config.use_l2warp else loss
 
         if not return_dict:
             output = (logits,) + outputs[1:]
             return (loss,) + output if loss is not None else output
 
-        return MetaMamba2CausalLMOutput(
-            loss=loss, 
-            logits=logits, 
-            cache_params=outputs.cache_params,
-            hidden_states=outputs.hidden_states
+        return CausalLMOutputWithPast(
+            loss=loss,
+            logits=logits,
+            past_key_values=outputs.past_key_values,
+            hidden_states=outputs.hidden_states,
+            attentions=outputs.attentions,
         )

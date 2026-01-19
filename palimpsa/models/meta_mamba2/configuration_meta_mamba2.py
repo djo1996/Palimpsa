@@ -48,6 +48,8 @@ class MetaMamba2Config(PretrainedConfig):
         fuse_linear_cross_entropy: bool = False,
         use_l2warp: bool = False,
         tie_word_embeddings: bool = False,
+        init_diagnosis: bool = True, 
+        eval_diagnosis: bool = False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -65,6 +67,8 @@ class MetaMamba2Config(PretrainedConfig):
         self.hidden_act = hidden_act
         self.initializer_range = initializer_range
         self.residual_in_fp32 = residual_in_fp32
+        self.init_diagnosis = init_diagnosis
+        self.eval_diagnosis = eval_diagnosis
         
         # Bayesian / Metaplasticity config
         self.metaplasticity = metaplasticity

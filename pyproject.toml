@@ -20,7 +20,9 @@ dependencies = [
     "tyro",
     "lm_eval",
     "matplotlib",
-    "numpy"
+    "numpy",
+    "wonderwords",  # Added for RULER/NIAH tasks
+    "nltk"          # Added for RULER/NIAH tasks
 ]
 
 [tool.setuptools.packages.find]

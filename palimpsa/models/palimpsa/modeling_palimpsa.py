@@ -66,11 +66,11 @@ class PalimpsaBlock(GradientCheckpointingLayer):
                 conv_size=config.conv_size,
                 norm_eps=config.norm_eps,
                 layer_idx=layer_idx,
-                qk_act=config.qk_act,
                 metaplasticity=getattr(config, "metaplasticity", True),
                 finetuning=getattr(config, "finetuning", False),
-                gumbel_temp=getattr(config, "gumbel_temp", 0.5),
-                k_temp=getattr(config, "k_temp", 1)
+                use_residual=getattr(config, "use_residual", True),
+                init_diagnosis=getattr(config, "init_diagnosis", False),
+                eval_diagnosis=getattr(config, "eval_diagnosis", False)
             )
         self.mlp_norm = (RMSNorm if config.fuse_norm else nn.RMSNorm)(config.hidden_size, eps=config.norm_eps)
         self.mlp = GatedDeltaNetMLP(

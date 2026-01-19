@@ -47,7 +47,7 @@ def main():
     # Run Evaluation
     results = simple_evaluate(
         model="hf",
-        model_args=f"pretrained={args.model_path},trust_remote_code=False,dtype=bfloat16",
+        model_args=f"pretrained={args.model_path},trust_remote_code=False,dtype=bfloat16,max_length=32768",
         tasks=args.tasks.split(","),
         batch_size=args.batch_size,
         device=args.device,
