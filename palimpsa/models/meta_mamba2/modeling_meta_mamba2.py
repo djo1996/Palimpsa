@@ -96,7 +96,7 @@ class MetaMamba2Block(GradientCheckpointingLayer):
 
 class MetaMamba2PreTrainedModel(PreTrainedModel):
     config_class = MetaMamba2Config
-    base_model_prefix = "model"
+    base_model_prefix = "backbone"
     _no_split_modules = ["MetaMamba2Block"]
     supports_gradient_checkpointing = True
     _supports_cache_class = True
@@ -249,17 +249,17 @@ class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
     _tied_weights_keys = ["lm_head.weight"]
     def __init__(self, config):
         super().__init__(config)
-        self.model = MetaMamba2Model(config)
+        self.backbone = MetaMamba2Model(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.criterion = None
         self.post_init()
 
     def get_input_embeddings(self):
-        return self.model.embeddings
+        return self.backbone.embeddings
 
     def set_input_embeddings(self, value):
-        self.model.embeddings = value
+        self.backbone.embeddings = value
 
     def get_output_embeddings(self):
         return self.lm_head
@@ -268,10 +268,10 @@ class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
         self.lm_head = new_embeddings
 
     def set_decoder(self, decoder):
-        self.model = decoder
+        self.backbone = decoder
 
     def get_decoder(self):
-        return self.model
+        return self.backbone
 
     def generate(self, *args, **kwargs):
         try:
@@ -303,7 +303,7 @@ class MetaMamba2ForCausalLM(MetaMamba2PreTrainedModel, FLAGenerationMixin):
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         
-        outputs = self.model(
+        outputs = self.backbone(
             input_ids=input_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
