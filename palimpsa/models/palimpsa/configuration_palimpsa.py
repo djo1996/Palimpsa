@@ -22,7 +22,7 @@ class PalimpsaConfig(PretrainedConfig):
         head_dim: int = 256,
         num_heads: int = 6,
         num_v_heads: Optional[int] = None,
-        attn_mode: str = "chunk", 
+        mode: str = "chunk", 
         max_position_embeddings: int = 2048,
         hidden_ratio: Optional[int] = 4,
         intermediate_size: Optional[int] = None,
@@ -62,6 +62,8 @@ class PalimpsaConfig(PretrainedConfig):
         self.metaplasticity = metaplasticity
         self.finetuning = finetuning 
         self.use_residual = use_residual 
+        self.init_diagnosis = init_diagnosis
+        self.eval_diagnosis = eval_diagnosis
         
 
         self.beta_step_rank = math.ceil(self.hidden_size / 16) if beta_step_rank == "auto" else beta_step_rank
