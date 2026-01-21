@@ -217,4 +217,4 @@ def train(config: TrainConfig):
 
 if __name__ == "__main__":
     config = TrainConfig.from_cli()
-    train()
+    train(config)

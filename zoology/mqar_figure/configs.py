@@ -18,7 +18,7 @@ def set_seed(seed: int):
         torch.backends.cudnn.benchmark = False
 
 configs = []
-for SWEEP_SEED in [1,2,3,4,5]:
+for SWEEP_SEED in [1,2,3,4,5,6,7,8]:
 
     set_seed(SWEEP_SEED)
 
@@ -28,7 +28,7 @@ for SWEEP_SEED in [1,2,3,4,5]:
     # Use a local cache directory relative to the project root
     # This avoids "Could not create directory" permission errors on the cluster
     CACHE_DIR = os.path.join(os.getcwd(), f"cache/mqar_seed_{SWEEP_SEED}")
-    for input_seq_len, num_kv_pairs in [(128, 32), (256, 64), (512, 128), (1024, 256)]:
+    for input_seq_len, num_kv_pairs in [(512, 128), (1024, 256)]:
         if input_seq_len == 1024:
             batch_size = 64
         else:
@@ -49,8 +49,9 @@ for SWEEP_SEED in [1,2,3,4,5]:
             seed=SWEEP_SEED,
         )
         for d_model in [128]:
-            for lr in [2.15e-3, 1e-2]:
-                # in  np.logspace(-4, -2, 4)[2.15e-3, 1e-2]
+            
+            for lr in np.logspace(-3, -2, 4):
+                # in  np.logspace(-4, -2, 4)[2.15e-3, 1e-2][1e-4, 4.64e-4]
                 # Mixer Definitions with dynamic head alignment
                 MIXERS = {
                     "GatedDeltaNet": dict(
@@ -139,11 +140,11 @@ for SWEEP_SEED in [1,2,3,4,5]:
                         model=model,
                         data=data,
                         learning_rate=lr,
-                        max_epochs=64,
+                        max_epochs=60,
                         seed=SWEEP_SEED,
                         run_id=f"{sequence_mixer}-seqlen{input_seq_len}-dmodel{d_model}-lr{lr:.2e}-seed{SWEEP_SEED}-{run_timestamp}",
                         logger=LoggerConfig(
-                            project_name="Palimpsa_MQAR_seeds_very_small_forgetting-2",
+                            project_name="Palimpsa_MQAR_seeds_controlled_forgetting_final",
                             entity=os.environ.get("WANDB_ENTITY")
                         )
                     )

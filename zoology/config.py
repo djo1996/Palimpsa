@@ -108,6 +108,7 @@ class ModelConfig(BaseConfig):
 
     block_type: str = "TransformerBlock"
     name: str = "default"
+    forgetting: str = "normal"
 
 class LoggerConfig(BaseConfig):
 

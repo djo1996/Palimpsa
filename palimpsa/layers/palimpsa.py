@@ -104,9 +104,13 @@ class Palimpsa(nn.Module):
 
         self.b_rank_proj = nn.Linear(hidden_size, self.beta_step_rank, bias=False)
         self.b_proj = nn.Linear(self.beta_step_rank, self.value_dim, bias=False)
-
+        if not self.metaplasticity:
+            for p in self.b_rank_proj.parameters():
+                p.requires_grad = False
+            for p in self.b_proj.parameters():
+                p.requires_grad = False
     
-        self.b_scale = nn.Parameter(torch.ones(self.num_v_heads))
+        self.b_scale = nn.Parameter(torch.ones(self.num_v_heads),requires_grad=self.metaplasticity)
         self.b_scale._no_weight_decay = True
 
         self.bs_proj = nn.Linear(hidden_size, self.num_v_heads, bias=False)

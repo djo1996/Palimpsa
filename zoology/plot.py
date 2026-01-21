@@ -63,6 +63,9 @@ df["lr"] = pd.to_numeric(df["lr"])
 df["seed"] = pd.to_numeric(df["seed"])
 df["accuracy"] = df[METRIC_KEY]
 
+
+df = df[~df["seed"].isin([5, 6])]
+
 # =================================================================
 # 4. Filter for Best LR (Per Model, Per SeqLen, Per Seed)
 # =================================================================
@@ -192,7 +195,7 @@ for i, slen in enumerate(lengths_to_plot):
     )
 
     axes[i].set_title(f"Sequence Length: {slen}", fontsize=14, fontweight='bold')
-    axes[i].set_ylim(0, 1.05)
+    axes[i].set_ylim(0.25, 1.05)
     axes[i].set_ylabel("Validation Accuracy" if i == 0 else "")
     axes[i].set_xlabel("") # Cleaner look
     
@@ -205,3 +208,85 @@ plt.subplots_adjust(top=0.88) # Create space for the suptitle
 
 plt.savefig("mqar_bar_comparison_fixed.png", dpi=300, bbox_inches='tight')
 print("Fixed bar plots saved to mqar_bar_comparison_fixed.png")
+
+# =================================================================
+# 7. Performance at the Lowest Learning Rate (All Configs & Seeds)
+# =================================================================
+
+# 1. Identify the lowest LR for each (model, seq_len, seed)
+# We sort by LR ascending so the first entry in each group is the minimum LR
+lowest_lr_df = df.sort_values("lr", ascending=True).drop_duplicates(
+    subset=["model", "seq_len", "seed"], 
+    keep="first"
+).copy()
+
+plt.figure(figsize=(12, 7))
+
+# 2. Bar plot showing accuracy at the lowest LR
+# Using 'hue="model"' and 'x="seq_len"' to see how the lowest LR scales
+sns.barplot(
+    data=lowest_lr_df,
+    x="seq_len",
+    y="accuracy",
+    hue="model",
+    hue_order=model_order,
+    errorbar="sd",
+    capsize=.05,
+    palette="viridis"
+)
+
+# 3. Overlay individual seed points to see the spread at this low LR
+sns.stripplot(
+    data=lowest_lr_df,
+    x="seq_len",
+    y="accuracy",
+    hue="model",
+    hue_order=model_order,
+    dodge=True,
+    color="black",
+    alpha=0.3,
+    size=4,
+    legend=False
+)
+
+plt.title("MQAR Accuracy: Forced Lowest Learning Rate\n(All Seeds included)", fontsize=14, fontweight='bold')
+plt.ylim(0., 1.05) # Your requested y-axis cut
+plt.ylabel("Validation Accuracy")
+plt.xlabel("Sequence Length")
+plt.legend(title="Model", bbox_to_anchor=(1.05, 1), loc='upper left')
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.tight_layout()
+
+plt.savefig("mqar_lowest_lr_performance.png", dpi=300)
+print(f"Lowest LR plot saved. Total runs plotted: {len(lowest_lr_df)}")
+
+
+# =================================================================
+# 7. Performance at the SECOND Lowest Learning Rate
+# =================================================================
+
+# 1. Sort by LR ascending
+df_sorted = df.sort_values(["model", "seq_len", "seed", "lr"], ascending=True)
+
+# 2. Group and take the Nth entry (0 is 1st, 1 is 2nd)
+second_lowest_df = df_sorted.groupby(["model", "seq_len", "seed"]).nth(1)
+
+# Note: .nth() might return fewer rows if some configs only had 1 LR run.
+print(f"Runs using the 2nd lowest LR: {len(second_lowest_df)}")
+
+# 3. Plotting (Same logic as before)
+plt.figure(figsize=(12, 7))
+sns.barplot(
+    data=second_lowest_df.reset_index(), # reset_index because .nth() makes keys the index
+    x="seq_len",
+    y="accuracy",
+    hue="model",
+    hue_order=model_order,
+    errorbar="sd",
+    palette="viridis"
+)
+
+plt.ylim(0., 1.05)
+plt.title("MQAR Accuracy: Forced SECOND Lowest Learning Rate", fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.savefig("mqar_second_lowest_lr.png", dpi=300)

@@ -54,7 +54,7 @@ class PalimpsaBlock(GradientCheckpointingLayer):
             self.attn = Palimpsa(
                 hidden_size=config.hidden_size,
                 expand_v=config.expand_v,
-                reduct_k=config.reduct_k,
+                expand_k=config.expand_k,
                 head_dim=config.head_dim,
                 num_heads=config.num_heads,
                 num_v_heads=config.num_v_heads,

@@ -1,39 +1,64 @@
-# --- Python & Build ---
+# --- Python & Build Artifacts ---
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 *.egg-info/
 build/
 dist/
 .eggs/
+*.so
+*.o
 
 # --- Environments ---
 .env
 venv/
-palimpsa_env/
 .venv/
+palimpsa_env/
+.uv/
 
-# --- Data & Weights (CRITICAL) ---
+# --- Data & Large Binaries ---
 *.bin
 *.pkl
 *.pt
 *.pth
 *.ckpt
 *.safetensors
-data_cache/
-Palimpsa/data/data_mqar/cache/
+*.joblib
 
-# --- Specific Project Outputs ---
+# Ignore local caches and generated datasets
+cache/
+data_cache/
+# Ignore Shakespeare raw data and artifacts
+data/shakespeare_char/input.txt
+data/shakespeare_char/*.bin
+
+# --- Research Outputs & Plot Graveyard ---
+# Ignore all generated figures (matches your zoology/ pic)
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# Block experiment folders and logs
 out_nano/
 checkpoints/
 results/
-
-# --- Logs & Debugging ---
+exp/
+logs/
 wandb/
+wandb_metadata/
+
+# Standard execution logs
 *.log
 *.out
 *.err
+slurm-*.out
+*.prof
 
-# --- IDEs ---
+# --- IDEs & OS Trash ---
 .vscode/
 .idea/
 .DS_Store
+*.swp

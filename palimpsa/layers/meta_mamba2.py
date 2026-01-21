@@ -141,11 +141,13 @@ class MetaMamba2(nn.Module):
         # Metaplasticity parameters
         self.b_rank_proj = nn.Linear(hidden_size, self.beta_step_rank, bias=False)
         self.b_proj = nn.Linear(self.beta_step_rank, self.intermediate_size, bias=False)
-        #New
-        b_scale_min, b_scale_max = 0.1, 1
-        b_scale = torch.exp(torch.rand(self.num_heads) * (math.log(b_scale_max) - math.log(b_scale_min)) + math.log(b_scale_min)).clamp(min=1e-4)
-        inv_b_scale = b_scale + torch.log(-torch.expm1(-b_scale))
-        self.b_scale = nn.Parameter(inv_b_scale)
+        if not self.metaplasticity:
+            for p in self.b_rank_proj.parameters():
+                p.requires_grad = False
+            for p in self.b_proj.parameters():
+                p.requires_grad = False
+                
+        self.b_scale = nn.Parameter(torch.ones(self.num_heads),requires_grad=self.metaplasticity)
         self.b_scale._no_weight_decay = True
 
         self.Ip_log = nn.Parameter(torch.zeros(self.num_heads), requires_grad=False)
@@ -364,7 +366,6 @@ class MetaMamba2(nn.Module):
         o = self.out_proj(o.to(hidden_states.dtype))
         if attention_mask is not None:
             o = pad_input(o.squeeze(0), indices, batch_size, q_len)
-        
         # [Diagnostic Eval Block]
         if self.eval_diagnosis and not self.training and self.metaplasticity:
              self._diag_eval(final_I, b, dt, A)
