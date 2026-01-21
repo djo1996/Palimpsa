@@ -30,7 +30,7 @@ def perform_surgery(args):
     
     # 1. Load the new target configuration and tokenizer.
     # The config defines the new 'metaplasticity' status and 'beta_step_rank'.
-    config = AutoConfig.from_json_file(args.new_config)
+    config = AutoConfig.from_pretrained(args.new_config)
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer_path, trust_remote_code=True)
     
     # 2. Create the exact Flame-compatible structure: dst_dir/checkpoint/step-0
