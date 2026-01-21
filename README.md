@@ -201,22 +201,26 @@ bash evaluation/run_eval.sh 1 palimpsa-170M 3000 "hellaswag" &
 
 wait
 ```
+## 🏗️ Metaplastic Finetuning (Surgery)
 
-can you do me a markdown that I can copy and past in my readme from that? 🏗️ Metaplastic Finetuning (Surgery)
-We provide a specialized "surgery" pipeline to transform standard models (e.g., a pretrained Mamba2 or GatedDeltaNet) into Palimpsa models. This process preserves the pretrained "backbone" (MLP and Attention weights) while performing a fresh meta-initialization of the plasticity parameters.
+We provide a specialized **"surgery"** pipeline to transform standard models (e.g., a pretrained Mamba2 or GatedDeltaNet) into **Palimpsa** models. This process preserves the pretrained "backbone" (MLP and Attention weights) while performing a fresh meta-initialization of the plasticity parameters.
 
-1. Perform Model Surgery
-This script reads a source experiment, purges any outdated or dummy plasticity keys, and generates a new sharded Distributed Checkpoint (DCP) compatible with the Flame engine.
-The script creates a checkpoint/step-0/ directory in the destination folder, allowing you to resume training immediately.
+### 1. Perform Model Surgery
+This script reads a source experiment, purges outdated or dummy plasticity keys, and generates a new sharded **Distributed Checkpoint (DCP)** compatible with the Flame engine.
 
-2. Launch Finetuning
-Once the surgery is complete, launch the training using torchrun. Ensure you set the load step to 0 to pick up your newly initialized model.
-🔬 Technical Note: The Surgery Logic
-The prepare_finetune.py utility handles the transition between different architectural ranks by:
+The script creates a `checkpoint/step-0/` directory in the destination folder, allowing you to resume training immediately.
 
-Consolidating the source DCP shards into a temporary state.
-Filtering keys associated with b_proj, b_scale, and Ip_log.
-Injecting the backbone into the new model skeleton, where missing plasticity parameters are re-initialized according to your new research configuration.
+### 2. Launch Finetuning
+Once the surgery is complete, launch the training using `torchrun`. Ensure you set the load step to **0** to pick up your newly initialized model.
+
+---
+
+### 🔬 Technical Note: The Surgery Logic
+The `prepare_finetune.py` utility handles the transition between different architectural ranks by:
+
+* **Consolidating** the source DCP shards into a temporary state.
+* **Filtering** keys associated with `b_proj`, `b_scale`, and `Ip_log`.
+* **Injecting** the backbone into the new model skeleton, where missing plasticity parameters are re-initialized according to your new research configuration.
 ---
 
 ## 📜 Citation
