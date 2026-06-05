@@ -242,15 +242,14 @@ The `prepare_finetune.py` utility handles the transition between different archi
 
 
 ---
-
 ## 📜 Citation
 
 ```bibtex
-@article{bonnet2025palimpsa,
+@inproceedings{bonnet2026learning,
   title={Learning to Remember, Learn, and Forget in Attention-Based Models},
-  author={Bonnet, Djohan and et al.},
-  journal={Under Review},
-  year={2025},
-  url={[https://github.com/djo1996/Palimpsa](https://github.com/djo1996/Palimpsa)}
+  author={Bonnet, Djohan and Lohoff, Jamie and Finkbeiner, Jan and Skhikerujah, Elidona and Neftci, Emre},
+  booktitle={International Conference on Machine Learning (ICML)},
+  year={2026},
+  url={[https://arxiv.org/abs/2602.09075](https://arxiv.org/abs/2602.09075)}
 }
 ```
