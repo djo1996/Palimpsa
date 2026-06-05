@@ -4,7 +4,7 @@
 # Palimpsa
 ### Learning to Remember, Learn, and Forget in Attention-Based Models
 
-[![Paper](https://img.shields.io/badge/Paper-Under%20Review-blue)](https://arxiv.org/abs/2504.13569)
+[![Paper](https://img.shields.io/badge/Paper-ICML%202026-success)](https://arxiv.org/abs/2602.09075)
 [![Framework](https://img.shields.io/badge/Built%20On-Flame%20%26%20FLA-firebrick)](https://github.com/fla-org/flame)
 [![License](https://img.shields.io/badge/License-MIT-green)]()
 
