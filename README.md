@@ -152,7 +152,7 @@ torchrun --nproc_per_node=4 \
     --training.dataset HuggingFaceFW/fineweb-edu \
     --training.dataset_name sample-100BT \
     --training.dataset_split train \
-    --training.num_workers 8 \
+    --training.num_workers 4 \
     --checkpoint.interval 200 \
     --metrics.log_freq 10
 ```
