@@ -250,6 +250,6 @@ The `prepare_finetune.py` utility handles the transition between different archi
   author={Bonnet, Djohan and Lohoff, Jamie and Finkbeiner, Jan and Skhikerujah, Elidona and Neftci, Emre},
   booktitle={Proceedings of the 43rd International Conference on Machine Learning},
   year={2026},
-  url={[https://arxiv.org/abs/2602.09075](https://arxiv.org/abs/2602.09075)}
+  url={arxiv.org/abs/2602.09075}
 }
 ```
