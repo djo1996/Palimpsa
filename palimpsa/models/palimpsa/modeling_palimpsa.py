@@ -60,6 +60,7 @@ class PalimpsaBlock(GradientCheckpointingLayer):
                 num_v_heads=config.num_v_heads,
                 beta_step_rank=config.beta_step_rank,
                 mode=getattr(config, 'attn_mode', 'chunk'),
+                kernel=getattr(config, 'kernel', 'exact'),
                 use_gate=config.use_gate,
                 use_short_conv=config.use_short_conv,
                 allow_neg_eigval=config.allow_neg_eigval,

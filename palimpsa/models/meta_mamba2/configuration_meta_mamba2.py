@@ -43,6 +43,7 @@ class MetaMamba2Config(PretrainedConfig):
         rms_norm: bool = True,
         chunk_size: int = 256,
         mode: str = 'chunk',
+        kernel: str = 'exact',
         fuse_norm: bool = True,
         fuse_cross_entropy: bool = True,
         fuse_linear_cross_entropy: bool = False,
@@ -74,6 +75,7 @@ class MetaMamba2Config(PretrainedConfig):
         self.metaplasticity = metaplasticity
         self.finetuning = finetuning
         self.mode = mode
+        self.kernel = kernel
         if beta_step_rank == "auto":
             self.beta_step_rank = math.ceil(self.hidden_size / 16)
         else:

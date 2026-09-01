@@ -22,7 +22,8 @@ class PalimpsaConfig(PretrainedConfig):
         head_dim: int = 256,
         num_heads: int = 6,
         num_v_heads: Optional[int] = None,
-        mode: str = "chunk", 
+        mode: str = "chunk",
+        kernel: str = "exact",
         max_position_embeddings: int = 2048,
         hidden_ratio: Optional[int] = 4,
         intermediate_size: Optional[int] = None,
@@ -59,6 +60,7 @@ class PalimpsaConfig(PretrainedConfig):
         self.num_heads = num_heads
         self.num_v_heads = num_v_heads
         self.mode = mode
+        self.kernel = kernel
         self.metaplasticity = metaplasticity
         self.finetuning = finetuning 
         self.use_residual = use_residual 

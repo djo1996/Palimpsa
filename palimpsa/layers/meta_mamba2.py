@@ -17,6 +17,8 @@ from fla.modules import FusedRMSNormGated, RMSNorm, ShortConvolution
 from fla.modules.layernorm_gated import RMSNormGated
 from fla.modules.activations import ACT2FN
 from palimpsa.ops.palimpsa import chunk_palimpsa, fused_recurrent_palimpsa
+from palimpsa.ops.fast_palimpsa import chunk_fast_palimpsa
+from palimpsa.ops.fast_palimpsa.chunk_fast_palimpsa import CHUNK_C as FAST_CHUNK_C
 from fla.ops.simple_gla import chunk_simple_gla, fused_recurrent_simple_gla
 import wandb 
 
@@ -37,6 +39,12 @@ class MetaMamba2(nn.Module):
     Meta-Mamba2 Layer.
     Adds Bayesian Metaplasticity terms (Ip, Beta) to the standard Mamba2 architecture.
     Uses Triton-only backend.
+
+    `kernel` selects the chunk-mode Triton kernel for the metaplastic path:
+    'exact' (default) is the token-exact recurrence; 'fast' is a chunked
+    isotropic-in-D_V approximation, lower per-step cost at large D_V (see
+    `palimpsa.ops.fast_palimpsa`). Both support varlen packing (`cu_seqlens`)
+    and recurrent-state caching.
     """
     def __init__(
         self,
@@ -62,6 +70,7 @@ class MetaMamba2(nn.Module):
         finetuning: bool = False,
         beta_step_rank: int=128,
         mode: str = 'chunk',
+        kernel: str = 'exact',
         init_diagnosis: bool = True,
         eval_diagnosis: bool = False,
     ) -> MetaMamba2:
@@ -78,7 +87,17 @@ class MetaMamba2(nn.Module):
              warnings.warn("⚠️ MetaMamba2 running in Mamba2 mode (Metaplasticity=False).")
         if self.finetuning:
              warnings.warn("⚠️ MetaMamba2 running in FINETUNING mode.")
-        
+
+        if kernel not in ('exact', 'fast'):
+            raise ValueError(f"kernel must be 'exact' or 'fast', got {kernel!r}.")
+        self.kernel = kernel
+        # 'exact' and 'fast' have different native chunk sizes (16 vs FAST_CHUNK_C).
+        # Unlike the Palimpsa layer, this class's existing `chunk_size` constructor
+        # arg is unrelated (unused elsewhere in this file today) -- not repurposed
+        # here to avoid a confusing name collision.
+        self._chunk_exact = 16
+        self._chunk_fast = FAST_CHUNK_C
+
 
         #num_heads equivalent to num_v_heads in gated deltanet 
         self.num_heads = num_heads 
@@ -329,8 +348,19 @@ class MetaMamba2(nn.Module):
             elif recurrent_state is not None:
                 active_mu = recurrent_state
             
-            if mode == 'chunk':
-                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=16, initial_mu_state=active_mu, initial_I_state=active_I)
+            if mode == 'chunk' and self.kernel == 'fast':
+                # scale=1.0 preserved deliberately, same reasoning as the exact branch
+                # below: mamba2's rms_norm is applied after the output gating, so the
+                # attention-style 1/sqrt(d) scale must not also be applied here.
+                outputs = chunk_fast_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, chunk_size=self._chunk_fast, output_final_state=use_cache, cu_seqlens=cu_seqlens, initial_mu_state=active_mu, initial_I_state=active_I)
+                if use_cache:
+                    o, final_mu, final_I = outputs
+                    recurrent_state = (final_mu, final_I)
+                else:
+                    o = outputs
+                    recurrent_state = None
+            elif mode == 'chunk':
+                outputs = chunk_palimpsa(q=C, k=B, v=dx, b=b, gt=dt, g=A, Ip=Ip, scale=1.0, output_final_state=use_cache, cu_seqlens=cu_seqlens, chunk_size=self._chunk_exact, initial_mu_state=active_mu, initial_I_state=active_I)
                 if use_cache:
                     o, final_mu, final_I = outputs
                     recurrent_state = (final_mu, final_I)

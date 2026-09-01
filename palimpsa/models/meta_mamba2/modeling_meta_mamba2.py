@@ -62,6 +62,7 @@ class MetaMamba2Block(GradientCheckpointingLayer):
             finetuning=config.finetuning,
             beta_step_rank=config.beta_step_rank,
             mode=config.mode,
+            kernel=getattr(config, 'kernel', 'exact'),
             init_diagnosis=getattr(config, "init_diagnosis", False),
             eval_diagnosis=getattr(config, "eval_diagnosis", False),
         )

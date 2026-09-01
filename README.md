@@ -13,6 +13,15 @@
 **Palimpsa** is a novel attention mechanism that views In-Context Learning (ICL) as a continual learning problem. It introduces **Bayesian Metaplasticity** to transformer architectures—dynamically adjusting the plasticity of memory states based on their uncertainty.
 
 ---
+## ⚡ New: Fast Palimpsa
+
+We now ship **Fast Palimpsa**, a chunked kernel that approximates the within-chunk read with a single **isotropic-in-D_V precision** per chunk (`Ibar = I.mean(dim=D_V)`) instead of each value channel's own precision, then extends outside the chunk exactly as Palimpsa already does. The approximation trades a small amount of accuracy for a **~6x** forward+backward speedup over exact Palimpsa (measured at matched shape, B=8 T=4096 H=16 D_K=48 D_V=96: 67.0ms → 11.2ms).
+
+Select it with `kernel="fast"` (default remains `"exact"`) on `PalimpsaConfig`/`MetaMamba2Config`, or directly on the `Palimpsa`/`MetaMamba2` layers — both kernels support varlen packing and recurrent-state caching.
+
+*Fast Palimpsa's Triton kernels, autotuning, and the `kernel="fast"/"exact"` integration were developed with [Claude](https://claude.com/claude-code) (Anthropic).*
+
+---
 ## 📂 Repository Structure
 
 The repository is organized to support both MQAR research benchmarks and large-scale pretraining using the Flame engine.
