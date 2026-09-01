@@ -1,29 +1,23 @@
 # -*- coding: utf-8 -*-
-# Fused recurrent kernel for Fast Palimpsa.
+# Fused recurrent kernel for Fast Palimpsa: exact Palimpsa's own recurrent kernel,
+# reused directly, for any beta shape (scalar-per-head or vector-per-channel).
 #
-# This is `fast_palimpsa_vec` called with `chunk_size=1` -- Fast Palimpsa's own
-# isotropic-in-D_V approximation at its smallest, most-exact granularity, NOT a
-# reuse of exact Palimpsa's unrelated recurrence. An earlier version of this file
-# reused `fused_recurrent_palimpsa` (exact Palimpsa's kernel) for scalar-per-head
-# beta and refused vector beta outright. That was wrong to ship: at C=1 there is
-# still a real, provable, and previously-measured (0.28 max abs, not noise)
-# difference between Fast Palimpsa's own math and the token-exact recurrence
-# whenever beta varies across D_V -- see `fast_palimpsa_vec`'s docstring on why
-# chunk_size is part of the operator, not just a tiling knob. Falling back to a
-# genuinely different operator for that case was a worse train/inference mismatch
-# than just using Fast Palimpsa's own C=1 limit, which is the closest
-# self-consistent approximation this operator family actually has to a streaming
-# form -- the same way any chunked-kernel model's decode path is never bit-exact
-# to its training-time chunk size, by construction, not a special case here.
-#
-# For scalar-per-head beta specifically, C=1 *is* exactly the token-exact
-# recurrence (verified in `test_fused_recurrent_fast`, matches to 3.5e-7, the
-# fp32 floor) -- so nothing is lost there, and vector beta now works too instead
-# of being refused.
+# Fast Palimpsa's chunked kernel carries state ACROSS chunk boundaries exactly: the
+# boundary state update (chunk_fast_palimpsa.py's M_c/I_c recursion) uses the full
+# per-channel beta (`bc`, not a D_V-collapsed `betabar`), so M_c/I_c at any chunk
+# boundary is bit-for-bit the same (D_V,D_K) state exact Palimpsa's own token-by-token
+# recursion would have at that same position. Only the WITHIN-chunk *read* (the
+# isotropic Ibar machinery) approximates -- and that machinery exists purely to avoid
+# an O(chunk_size x D_V x D_K) cost when processing several tokens per chunk at once.
+# It buys nothing when generating one token at a time: there is no "next chunk" to
+# amortize over, so continuing from an exact boundary state via exact Palimpsa's own
+# per-token recursion is not a different operator bolted on -- it is what Fast
+# Palimpsa's own chunk-boundary math already computes, just without the now-pointless
+# within-chunk shortcut.
 
 from __future__ import annotations
 
-from palimpsa.ops.fast_palimpsa.chunk_fast_palimpsa import fast_palimpsa_vec
+from palimpsa.ops.palimpsa.fused_recurrent_palimpsa import fused_recurrent_palimpsa
 
 
 def fused_recurrent_fast_palimpsa(
@@ -32,30 +26,15 @@ def fused_recurrent_fast_palimpsa(
     output_final_state=False, output_uncertainty=False,
     cu_seqlens=None,
 ):
-    """Fast Palimpsa's fused recurrent kernel: `fast_palimpsa_vec(chunk_size=1)`.
-
-    Works for any beta shape (scalar-per-head or vector-per-channel) -- unlike
-    exact Palimpsa's recurrence, this is not a separate implementation to keep in
-    sync, it is the same chunked math this package's training-time kernel uses,
-    just at C=1. See the module header for why that is the right choice, not a
-    workaround.
+    """Fast Palimpsa's fused recurrent kernel: exact Palimpsa's own recurrent
+    kernel, reused directly -- see the module header for why that is correct
+    (not an approximation swap) rather than a workaround.
     """
-    if cu_seqlens is not None:
-        raise NotImplementedError(
-            "fused_recurrent_fast_palimpsa: cu_seqlens (varlen packing) is not "
-            "implemented yet -- fast_palimpsa_vec has no padding-free varlen path "
-            "(see fast_palimpsa_ref_varlen's padding-based approach for the "
-            "chunked kernel's own varlen story, not yet ported to the C=1 "
-            "recurrent case)."
-        )
-    if output_uncertainty:
-        raise NotImplementedError(
-            "fused_recurrent_fast_palimpsa: output_uncertainty is not implemented."
-        )
-    return fast_palimpsa_vec(
-        q, k, v, b, gt, g, Ip, scale=scale, chunk_size=1,
+    return fused_recurrent_palimpsa(
+        q, k, v, b, gt, g, Ip, scale=scale,
         initial_mu_state=initial_mu_state, initial_I_state=initial_I_state,
-        output_final_state=output_final_state,
+        output_final_state=output_final_state, output_uncertainty=output_uncertainty,
+        cu_seqlens=cu_seqlens,
     )
 
 

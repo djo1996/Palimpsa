@@ -273,9 +273,7 @@ def fast_palimpsa_ref_varlen(q, k, v, b, gt, g, Ip, cu_seqlens, scale=None,
     return torch.cat(outs, dim=1)
 
 
-def fast_palimpsa_vec(q, k, v, b, gt, g, Ip, scale=None, chunk_size=CHUNK_C,
-                      initial_mu_state=None, initial_I_state=None,
-                      output_final_state=False):
+def fast_palimpsa_vec(q, k, v, b, gt, g, Ip, scale=None, chunk_size=CHUNK_C):
     """Chunk-parallel, fully-vectorized implementation (no Python token loops).
 
     Same math as fast_palimpsa_ref, but the two intra-chunk `for t in range(C)`
@@ -285,15 +283,6 @@ def fast_palimpsa_vec(q, k, v, b, gt, g, Ip, scale=None, chunk_size=CHUNK_C,
     is why it sidesteps the SMEM blow-up that the hand-written Triton backward
     hits at D_V=192. Verified to match the loop reference fwd + all grads to
     machine precision (fp64).
-
-    `chunk_size` is not just a tiling knob here -- it is part of the operator:
-    Fast Palimpsa's isotropic-in-D_V collapse (`Ibar_c = I_c.mean(dim=D_V)`)
-    happens fresh every chunk, so a smaller C makes fewer tokens' precision get
-    collapsed together and is a strictly closer approximation to exact Palimpsa,
-    not merely a faster/slower version of the same answer. `initial_mu_state`/
-    `initial_I_state`/`output_final_state` make `chunk_size=1` usable as this
-    operator's own recurrent form -- see `fused_recurrent_fast_palimpsa`, which
-    is exactly this function called with `chunk_size=1`.
     """
     B, L, H, DK = q.shape
     DV = v.shape[-1]
@@ -308,12 +297,8 @@ def fast_palimpsa_vec(q, k, v, b, gt, g, Ip, scale=None, chunk_size=CHUNK_C,
     Ip_k = Ip_k if perdk else Ipv.view(1, H, 1).expand(1, H, DK)
 
     qs = q * scale
-    if initial_mu_state is not None:
-        I_c = initial_I_state.to(dt)
-        M_c = initial_mu_state.to(dt) * I_c
-    else:
-        M_c = torch.zeros(B, H, DV, DK, dtype=dt, device=dev)
-        I_c = Ip_k.view(1, H, 1, DK).expand(B, H, DV, DK).clone()
+    M_c = torch.zeros(B, H, DV, DK, dtype=dt, device=dev)
+    I_c = Ip_k.view(1, H, 1, DK).expand(B, H, DV, DK).clone()
 
     triCC = torch.tril(torch.ones(C, C, device=dev, dtype=dt)).view(1, C, C, 1)
     y_out = torch.zeros(B, L, H, DV, dtype=dt, device=dev)
@@ -360,8 +345,6 @@ def fast_palimpsa_vec(q, k, v, b, gt, g, Ip, scale=None, chunk_size=CHUNK_C,
         I_c = (pf * I_c + (1 - pf) * Ip_k.view(1, H, 1, DK)
                + torch.einsum('bthv,bthd->bhvd', w.unsqueeze(-1) * bc, ksq))
 
-    if output_final_state:
-        return y_out, M_c / I_c, I_c
     return y_out
 
 
