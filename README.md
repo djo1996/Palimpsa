@@ -19,7 +19,7 @@ We now ship **Fast Palimpsa**, a chunked kernel that approximates the within-chu
 
 Select it with `kernel="fast"` (default remains `"exact"`) on `PalimpsaConfig`/`MetaMamba2Config`, or directly on the `Palimpsa`/`MetaMamba2` layers — both kernels support varlen packing and recurrent-state caching.
 
-*Fast Palimpsa's Triton kernels, autotuning, and the `kernel="fast"/"exact"` integration were developed with [Claude](https://claude.com/claude-code) (Anthropic).*
+*The Fast Palimpsa kernel was developed with [Claude](https://claude.com/claude-code) (Anthropic).*
 
 ---
 ## 📂 Repository Structure
